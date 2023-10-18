@@ -2,7 +2,7 @@
 import re
 import time
 import torch
-import openai
+#  import openai
 import pickle
 from lean_dojo import Pos
 from loguru import logger
@@ -199,6 +199,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         tactic_ids = batch["tactic_ids"]
 
         loss = self(state_ids, state_mask, tactic_ids)
+        print("loss_val", loss)
         self.log(f"loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
 
@@ -353,6 +354,305 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
 
         return tactics_with_scores
 
+class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
+    def __init__(
+        self,
+        backbone_model_name: str,
+        num_memory_tokens: int,
+        num_segments: int,
+        lr: float,
+        warmup_steps: int,
+        num_beams: int,
+        eval_num_retrieved: int,
+        eval_num_cpus: int,
+        eval_num_theorems: int,
+        max_seq_len: int,
+        length_penalty: float = 0.0,
+        ret_ckpt_path: Optional[str] = None,
+        skip_test_proving: bool = True,
+    ) -> None:
+        self.num_memory_tokens = num_memory_tokens
+        self.num_segments = num_segments
+        self.max_nonmemory_seq_len = max_seq_len - 2 * num_memory_tokens
+
+        self.skip_test_proving = skip_test_proving
+        RetrievalAugmentedGenerator.__init__(self, backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved,
+                                             eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
+                                             length_penalty, ret_ckpt_path)
+        
+
+    @classmethod
+    def load(
+        cls, ckpt_path: str, device, freeze: bool
+    ) -> "RMTRetrievalAugmentedGenerator":
+        return load_checkpoint(cls, ckpt_path, device, freeze)
+
+    def _encode_with_memory(
+        self,
+        state_ids: List[torch.Tensor], # state_ids[seg][idx in batch][token] = emb vector
+        state_mask: List[torch.Tensor]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Takes a list of segments and compute the output of encoder with memory.
+        Returns this output and attention mask of the encoder on the last segment.
+        """
+        # Expand embeddings
+        state_embeds = []
+        num_segments = len(state_ids)
+        new_state_mask = []
+        for segment in range(num_segments):
+            memory_state_shape = (state_ids[segment].shape[0], self.num_memory_tokens, self.generator.model_dim)
+            memory_mask_shape = (state_ids[segment].shape[0], self.num_memory_tokens)
+            device = state_ids[segment].device
+            state_embeds.append(torch.cat((
+                torch.zeros(memory_state_shape, device=device), # read memory
+                self.generator.shared(state_ids[segment]),
+                torch.zeros(memory_state_shape, device=device), # write memory
+            ), dim=-2))
+            new_state_mask.append(torch.cat((
+                torch.ones(memory_mask_shape, device=device), # read memory
+                state_mask[segment],
+                torch.ones(memory_mask_shape, device=device), # write memory
+            ), dim=-1))
+
+        # Compute memory
+        for segment in range(num_segments):
+            enc_out = self.generator.encoder(
+                inputs_embeds=state_embeds[segment],
+                attention_mask=new_state_mask[segment],
+            )
+            if segment < num_segments - 1:
+                state_embeds[segment + 1][:, :self.num_memory_tokens, :] = enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]
+
+        return enc_out, new_state_mask[-1]
+    
+    def forward(
+        self,
+        state_ids: List[torch.Tensor], # state_ids[seg][idx in batch][token] = emb vector
+        state_mask: List[torch.Tensor],
+        tactic_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+        #decoder_input_ids = tactic_ids
+        #decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
+        return self.generator(
+            #input_ids=decoder_input_ids,
+            labels=tactic_ids,
+            encoder_outputs=enc_out,
+            attention_mask=last_enc_mask,
+        ).loss
+
+    ############
+    # Training #
+    ############
+    
+    def training_step(self, batch, batch_idx: int):
+        loss = self(
+            batch["state_ids"],
+            batch["state_mask"],
+            batch["tactic_ids"],
+        )
+        self.log(
+            "loss_train",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=len(batch),
+        )
+        #self._log_io_texts("train", batch["state_ids"], batch["tactic_ids"])
+        return loss
+
+    def _log_io_texts(
+        self,
+        split: str,
+        state_ids: List[torch.LongTensor],
+        tactic_ids: torch.LongTensor,
+    ) -> None:
+        tb = self.logger.experiment
+        inp = self.tokenizer.decode(state_ids[-1][0], skip_special_tokens=True)
+        oup_ids = torch.where(
+            tactic_ids[0] == -100, self.tokenizer.pad_token_id, tactic_ids[0]
+        )
+        oup = self.tokenizer.decode(oup_ids, skip_special_tokens=True)
+
+        tb.log({
+            "state": inp,
+            "tactic": oup,
+            "split": split,
+            "global step": self.global_step
+        })
+        # tb.add_text(f"{split}_state", f"```\n{inp}\n```", self.global_step)
+        # tb.add_text(f"{split}_tactic", f"`{oup}`", self.global_step)
+
+    ##############
+    # Validation #
+    ##############
+    
+    def validation_step(self, batch: Dict[str, Any], _) -> None:
+        state_ids = batch["state_ids"]
+        state_mask = batch["state_mask"]
+        tactic_ids = batch["tactic_ids"]
+
+        loss = self(state_ids, state_mask, tactic_ids)
+        self.log("loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
+        self._log_io_texts("val", state_ids, tactic_ids)
+
+        # Generate topk tactic candidates via Beam Search.
+        enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+        output = self.generator.generate(
+            encoder_outputs=enc_out,
+            attention_mask=last_enc_mask,
+            max_length=self.max_seq_len,
+            num_beams=self.num_beams,
+            do_sample=False,
+            num_return_sequences=self.num_beams,
+            early_stopping=False,
+        )
+        output_text = self.tokenizer.batch_decode(output, skip_special_tokens=True)
+        batch_size = state_ids[0].size(0)
+        assert len(output_text) == batch_size * self.num_beams
+        tactics_pred = [
+            output_text[i * self.num_beams : (i + 1) * self.num_beams]
+            for i in range(batch_size)
+        ]
+
+        # tb = self.logger.experiment
+        # msg = "\n".join(tactics_pred[0])
+        # tb.log({"preds_val": msg}\n```", self.global_step)
+
+        # # Log the topk accuracies.
+        # for k in range(1, self.num_beams + 1):
+        #     topk_acc = self.topk_accuracies[k]
+        #     topk_acc(tactics_pred, batch["tactic"])
+        #     self.log(f"top{k}_acc_val", topk_acc, on_step=False, on_epoch=True)
+
+    def on_validation_epoch_end(self) -> None:
+        ckpt_path = f"{self.trainer.log_dir}/checkpoints/last.ckpt"
+        self.trainer.save_checkpoint(ckpt_path)
+        logger.info(f"Saved checkpoint to {ckpt_path}")
+
+        if not self.skip_test_proving:
+            data_path = self.trainer.datamodule.data_path
+            if self.retriever is None:
+                cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
+            else:
+                self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+                corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
+                pickle.dump(
+                    IndexedCorpus(
+                        self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
+                    ),
+                    open(corpus_path, "wb"),
+                )
+                cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path} --indexed-corpus-path {corpus_path}"
+    
+            logger.info(cmd)
+    
+            wait_time = 3600
+            while True:
+                try:
+                    _, err = execute(cmd, capture_output=True)
+                    break
+                except CalledProcessError as ex:
+                    logger.error(ex)
+                    logger.error(
+                        f"Failed to evaluate. Retrying in {wait_time / 3600} hour..."
+                    )
+                    time.sleep(wait_time)
+                    wait_time *= 2
+    
+            m = re.search(r"Pass@1: (\S+)", err)
+            assert m is not None, err
+            acc = float(m.group(1))
+            self.log("Pass@1_val", acc, on_step=False, on_epoch=True)
+            logger.info(f"Pass@1: {acc}")
+
+    ##############
+    # Prediction #
+    ##############
+
+    def batch_generate(
+        self,
+        state: List[str],
+        file_path: List[str],
+        theorem_full_name: List[str],
+        theorem_pos: List[Pos],
+        num_samples: int,
+    ) -> List[List[Tuple[str, float]]]:
+        logger.debug(state)
+        assert self.retriever is not None
+        retrieved_premises, _ = self.retriever.retrieve(
+            state,
+            file_path,
+            theorem_full_name,
+            theorem_pos,
+            self.eval_num_retrieved,
+        )
+        segments = [[] for i in range(self.num_segments)]
+        for s, premises in zip_strict(state, retrieved_premises):
+            used_premises = 0
+            for i in range(self.num_segments):
+                new_segment, new_used_premises = _format_augmented_state(
+                    s,
+                    premises[:used_premises],
+                    self.max_seq_len,
+                    p_drop=0.0,
+                )
+                segments[i].append(new_segment)
+                used_premises += new_used_premises
+
+        segments.reverse() # best premises go int the end
+
+        tokenized_state = [
+            self.tokenizer(
+                segments[i],
+                padding="longest",
+                max_length=self.max_seq_len,
+                truncation=True,
+                return_tensors="pt",
+            )
+            for i in range(self.num_segments)]
+        
+        state_ids = [t.input_ids.to(self.device) for t in tokenized_state]
+        state_mask = [t.attention_mask.to(self.device) for t in tokenized_state]
+
+        enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+
+        # Generate tactic candidates using beam search.
+        output = self.generator.generate(
+            encoder_outputs=enc_out,
+            attention_mask=last_enc_mask,
+            max_length=self.max_seq_len,
+            num_beams=num_samples,
+            length_penalty=self.length_penalty,
+            do_sample=False,
+            num_return_sequences=num_samples,
+            early_stopping=False,
+            output_scores=True,
+            return_dict_in_generate=True,
+        )
+
+        # Return the output.
+        raw_output_text = self.tokenizer.batch_decode(
+            output.sequences, skip_special_tokens=True
+        )
+        raw_scores = output.sequences_scores.tolist()
+        tactics_with_scores = []
+
+        for i in range(len(state)):
+            output_text = []
+            output_score = []
+
+            for j in range(i * num_samples, (i + 1) * num_samples):
+                t = remove_marks(raw_output_text[j])
+                if t not in output_text:
+                    output_text.append(t)
+                    output_score.append(raw_scores[j])
+
+            tactics_with_scores.append(list(zip_strict(output_text, output_score)))
+
+        return tactics_with_scores
 
 class GPT4TacticGenerator(TacticGenerator):
     def __init__(

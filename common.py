@@ -387,17 +387,20 @@ def format_state(s: str) -> str:
     else:
         return s
 
-
-def format_augmented_state(
+def _format_augmented_state(
     s: str, premises: List[Premise], max_len: int, p_drop: float
-) -> str:
-    """Format a state with retrieved premises and drop some of them with probability ``p_drop``."""
+) -> Tuple[str, int]:
+    """
+    Format a state with retrieved premises and drop some of them with probability ``p_drop``.
+    Returns the augmented state and the number of included premises
+    """
     s = format_state(s)
 
     aug_s = ""
     length = 0
     max_premises_len = max_len - len(bytes(s.encode("utf-8")))
 
+    cnt_premises = 0
     for p in premises:
         if random.random() < p_drop:
             continue
@@ -407,9 +410,16 @@ def format_augmented_state(
             continue
         length += l
         aug_s = p_str + aug_s
+        cnt_premises += 1
 
     aug_s += s
-    return aug_s
+    return aug_s, cnt_premises
+
+def format_augmented_state(
+    s: str, premises: List[Premise], max_len: int, p_drop: float
+) -> str:
+    """Format a state with retrieved premises and drop some of them with probability ``p_drop``."""
+    return _format_augmented_state(s, premises, max_len, p_drop)[0]
 
 
 def get_optimizers(
