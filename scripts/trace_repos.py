@@ -1,7 +1,4 @@
 import os 
-os.environ["GITHUB_ACCESS_TOKEN"] = "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"
-#os.environ["NUM_PROCS"] = "1"
-#os.environ["VERBOSE"] = "1"
 
 import json
 import argparse

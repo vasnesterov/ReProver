@@ -1,6 +1,10 @@
-nohup.txt
+nohup.out
 data/
 lightning_logs/
+leandojo_rmt/
+checkpoints/
+wandb/
+pred_random.pickle
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
