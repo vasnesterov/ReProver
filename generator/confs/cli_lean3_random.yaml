@@ -34,7 +34,7 @@ trainer:
   log_every_n_steps: 10
 
 model:
-  model_name: kaiyuy/leandojo-lean3-retriever-byt5-small
+  model_name: kaiyuy/leandojo-lean3-retriever-tacgen-byt5-small
   lr: 5e-4
   warmup_steps: 2000
   num_beams: 1

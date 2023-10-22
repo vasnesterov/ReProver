@@ -193,13 +193,16 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     # Validation #
     ##############
 
-    def validation_step(self, batch: Dict[str, Any], _) -> None:
+    def validation_step(self, batch: Dict[str, Any], _) -> None:        
         state_ids = batch["state_ids"]
         state_mask = batch["state_mask"]
         tactic_ids = batch["tactic_ids"]
 
         loss = self(state_ids, state_mask, tactic_ids)
-        print("loss_val", loss)
+
+        print()
+        print("loss_val", loss.detach().cpu().item())
+        print()
         self.log(f"loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
 
