@@ -418,6 +418,8 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
                 torch.ones(memory_mask_shape, device=device), # write memory
             ), dim=-1))
 
+        print(state_ids[0].shape, state_embeds[0].shape)
+
         # Compute memory
         for segment in range(num_segments):
             enc_out = self.generator.encoder(
@@ -425,6 +427,8 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
                 attention_mask=new_state_mask[segment],
             )
             if segment < num_segments - 1:
+                print(torch.norm(enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]))
+                print(torch.norm(enc_out['last_hidden_state'][:, -2*self.num_memory_tokens:-self.num_memory_tokens, :]))
                 state_embeds[segment + 1][:, :self.num_memory_tokens, :] = enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]
 
         return enc_out, new_state_mask[-1]
