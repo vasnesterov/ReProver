@@ -521,7 +521,6 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     ##############
     
     def validation_step(self, batch: Dict[str, Any], _) -> None:
-        return 
         state_ids = batch["state_ids"]
         state_mask = batch["state_mask"]
         tactic_ids = batch["tactic_ids"]
