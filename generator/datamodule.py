@@ -240,13 +240,14 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
         self.num_segments = num_segments
 
     def __getitem__(self, idx: int) -> Example:
-        ex = self.data[idx]
+        ex = self.data[idx].copy()
 
         segments = []
         assert self.preds is not None
         file_path = ex["file_path"]
         pred = self.preds[(file_path, ex["full_name"], ex["state"])]
 
+        segments.append(format_state(ex["state"])) # it will be the last segment after reverse
         used_premises = 0
         for i in range(self.num_segments - 1):
             new_segment, new_used_premises = _format_augmented_state(
@@ -257,8 +258,6 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
             )
             segments.append(new_segment)
             used_premises += new_used_premises
-
-        segments.append(format_state(ex["state"]))
 
         if not self.keep_marks:
             segments = [remove_marks(segment) for segment in segments]
