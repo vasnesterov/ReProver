@@ -248,7 +248,7 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
         pred = self.preds[(file_path, ex["full_name"], ex["state"])]
 
         used_premises = 0
-        for i in range(self.num_segments):
+        for i in range(self.num_segments - 1):
             new_segment, new_used_premises = _format_augmented_state(
                 ex["state"],
                 pred["retrieved_premises"][used_premises:],
@@ -257,6 +257,8 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
             )
             segments.append(new_segment)
             used_premises += new_used_premises
+
+        segments.append(format_state(ex["state"]))
 
         if not self.keep_marks:
             segments = [remove_marks(segment) for segment in segments]
