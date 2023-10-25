@@ -25,7 +25,7 @@ trainer:
 
 model:
   backbone_model_name: kaiyuy/leandojo-lean3-retriever-tacgen-byt5-small
-  num_memory_tokens: 15
+  num_memory_tokens: 200
   max_seq_len: 2300
   lr: 5e-4
   warmup_steps: 2000

@@ -6,6 +6,7 @@ checkpoints/
 wandb/
 pred_random.pickle
 reprover_setup.sh
+test.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
