@@ -240,7 +240,7 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
         self.num_segments = num_segments
 
     def __getitem__(self, idx: int) -> Example:
-        ex = self.data[idx]
+        ex = self.data[idx].copy()
 
         segments = []
         assert self.preds is not None
