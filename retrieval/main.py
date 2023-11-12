@@ -1,7 +1,5 @@
 """Script for training the premise retriever.
 """
-import os
-os.environ["GITHUB_ACCESS_TOKEN"] = "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"
 
 from loguru import logger
 from pytorch_lightning.cli import LightningCLI

@@ -199,10 +199,9 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         tactic_ids = batch["tactic_ids"]
 
         loss = self(state_ids, state_mask, tactic_ids)
+        print(f"{loss=}")
+        return
 
-        print()
-        print("loss_val", loss.detach().cpu().item())
-        print()
         self.log(f"loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
 
@@ -389,7 +388,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         
         self.num_memory_tokens = num_memory_tokens
         self.num_segments = num_segments
-        self.max_nonmemory_seq_len = max_seq_len - 2 * num_memory_tokens
+        self.max_nonmemory_seq_len = max_seq_len - num_memory_tokens
 
         self.skip_test_proving = skip_test_proving
         self.skip_topk = skip_topk
@@ -414,12 +413,15 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     def _encode_with_memory(
         self,
         state_ids: List[torch.Tensor], # state_ids[seg][idx in batch][token] = emb vector
-        state_mask: List[torch.Tensor]
+        state_mask: List[torch.Tensor],
+        output_attentions: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Takes a list of segments and compute the output of encoder with memory.
         Returns this output and attention mask of the encoder on the last segment.
         """
+        return_dict = dict()
+        
         # Expand embeddings
         state_embeds = []
         num_segments = len(state_ids)
@@ -429,44 +431,56 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
             memory_mask_shape = (state_ids[segment].shape[0], self.num_memory_tokens)
             device = state_ids[segment].device
             state_embeds.append(torch.cat((
-                torch.zeros(memory_state_shape, device=device), # read memory
+                torch.zeros(memory_state_shape, device=device), # memory
                 self.backbone.generator.shared(state_ids[segment]),
-                torch.zeros(memory_state_shape, device=device), # write memory
             ), dim=-2))
             new_state_mask.append(torch.cat((
-                torch.ones(memory_mask_shape, device=device), # read memory
+                torch.ones(memory_mask_shape, device=device), # memory
                 state_mask[segment],
-                torch.ones(memory_mask_shape, device=device), # write memory
             ), dim=-1))
 
         # Compute memory
+        attentions = []
         for segment in range(num_segments):
             enc_out = self.backbone.generator.encoder(
                 inputs_embeds=state_embeds[segment],
                 attention_mask=new_state_mask[segment],
+                output_attentions=output_attentions,
             )
             if segment < num_segments - 1:
-                # print(torch.norm(enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]))
-                # print(torch.norm(enc_out['last_hidden_state'][:, -2*self.num_memory_tokens:-self.num_memory_tokens, :]))
-                state_embeds[segment + 1][:, :self.num_memory_tokens, :] = enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]
+                state_embeds[segment + 1][:, :self.num_memory_tokens, :] = enc_out['last_hidden_state'][:, :self.num_memory_tokens, :]
+            if output_attentions:
+                attentions.append(enc_out.attentions)
 
-        return enc_out, new_state_mask[-1]
+        return_dict['encoder_output'] = enc_out
+        return_dict['encoder_mask'] = new_state_mask[-1]
+        if output_attentions:
+            return_dict['attentions'] = attentions
+
+        return return_dict
     
     def forward(
         self,
         state_ids: List[torch.Tensor], # state_ids[seg][idx in batch][token] = emb vector
         state_mask: List[torch.Tensor],
         tactic_ids: torch.Tensor,
+        output_attentions: bool = False,
     ) -> torch.Tensor:
-        enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+        enc_dict = self._encode_with_memory(state_ids, state_mask, output_attentions=output_attentions)
+        enc_out = enc_dict['encoder_output']
+        last_enc_mask = enc_dict['encoder_mask']
         #decoder_input_ids = tactic_ids
         #decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
-        return self.backbone.generator(
+        out = self.backbone.generator(
             #input_ids=decoder_input_ids,
             labels=tactic_ids,
             encoder_outputs=enc_out,
             attention_mask=last_enc_mask,
-        ).loss
+            output_attentions=output_attentions,
+        )
+        if output_attentions:
+            out.encoder_attentions = enc_dict['attentions']
+        return out
 
     ############
     # Training #
@@ -477,7 +491,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
             batch["state_ids"],
             batch["state_mask"],
             batch["tactic_ids"],
-        )
+        ).loss
         self.log(
             "loss_train",
             loss,
@@ -488,6 +502,14 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         )
         #self._log_io_texts("train", batch["state_ids"], batch["tactic_ids"])
         return loss
+
+    def on_fit_start(self) -> None:
+        if self.logger is not None:
+            self.logger.log_hyperparams(self.hparams)
+            assert self.trainer is not None
+            logger.info(f"Logging to {self.trainer.log_dir}")
+
+        self.backbone.retriever.load_corpus(self.trainer.datamodule.corpus)
 
     def _log_io_texts(
         self,
@@ -525,7 +547,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         state_mask = batch["state_mask"]
         tactic_ids = batch["tactic_ids"]
 
-        loss = self(state_ids, state_mask, tactic_ids)
+        loss = self(state_ids, state_mask, tactic_ids).loss
         self.log("loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
 
@@ -626,7 +648,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     ) -> List[List[Tuple[str, float]]]:
         logger.debug(state)
         assert self.backbone.retriever is not None
-        retrieved_premises, _ = self.retriever.retrieve(
+        retrieved_premises, _ = self.backbone.retriever.retrieve(
             state,
             file_path,
             theorem_full_name,

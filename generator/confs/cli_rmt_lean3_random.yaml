@@ -45,5 +45,6 @@ data:
   eval_batch_size: 64
   num_segments: 2
   p_drop: 0.5
+  p_only_memory: 0.5
   normalize_tactics: true
   num_workers: 16

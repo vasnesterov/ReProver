@@ -2,6 +2,7 @@
 import os
 import json
 import pickle
+import random
 from tqdm import tqdm
 from loguru import logger
 import pytorch_lightning as pl
@@ -234,10 +235,12 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
         normalize_tactics: bool,
         tokenizer: ByT5Tokenizer,
         is_train: bool,
+        p_only_memory: float = 0.0
     ) -> None:
         GeneratorDataset.__init__(self, data_path, corpus, keep_marks, preds, max_seq_len,
                                                        p_drop, normalize_tactics, tokenizer, is_train)
         self.num_segments = num_segments
+        self.p_only_memory = p_only_memory
 
     def __getitem__(self, idx: int) -> Example:
         ex = self.data[idx].copy()
@@ -247,9 +250,14 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
         file_path = ex["file_path"]
         pred = self.preds[(file_path, ex["full_name"], ex["state"])]
 
-        segments.append(format_state(ex["state"])) # it will be the last segment after reverse
+        num_segments = self.num_segments
+
+        if self.is_train and random.random() < self.p_only_memory:
+            num_segments -= 1
+            segments.append(format_state("<placeholder>")) # it will be the last segment after reverse
+        
         used_premises = 0
-        for i in range(self.num_segments - 1):
+        for i in range(num_segments):
             new_segment, new_used_premises = _format_augmented_state(
                 ex["state"],
                 pred["retrieved_premises"][used_premises:],
@@ -320,6 +328,7 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
         p_drop: float,
         normalize_tactics: bool,
         num_workers: int,
+        p_only_memory: float = 0.0,
         corpus_path: Optional[str] = None,
         preds_path: Optional[str] = None,
     ) -> None:
@@ -338,6 +347,8 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
         self.normalize_tactics = normalize_tactics
         self.num_workers = num_workers
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        self.p_only_memory = p_only_memory
 
         if preds_path is None:
             logger.info("Without retrieval data")
@@ -365,6 +376,7 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
                 self.normalize_tactics,
                 self.tokenizer,
                 is_train=True,
+                p_only_memory=self.p_only_memory
             )
 
         if stage in (None, "fit", "validate"):
@@ -379,6 +391,7 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
                 self.normalize_tactics,
                 self.tokenizer,
                 is_train=False,
+                p_only_memory=self.p_only_memory
             )
 
     def train_dataloader(self) -> DataLoader:
