@@ -404,13 +404,13 @@ def _format_augmented_state(
     for p in premises:
         if random.random() < p_drop:
             continue
+        cnt_premises += 1
         p_str = f"{p.serialize()}\n\n"
         l = len(bytes(p_str.encode("utf-8")))
         if length + l > max_premises_len:
-            continue
+            break
         length += l
         aug_s = p_str + aug_s
-        cnt_premises += 1
 
     aug_s += s
     return aug_s, cnt_premises

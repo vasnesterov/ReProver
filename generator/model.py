@@ -193,13 +193,16 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     # Validation #
     ##############
 
-    def validation_step(self, batch: Dict[str, Any], _) -> None:
+    def validation_step(self, batch: Dict[str, Any], _) -> None:        
         state_ids = batch["state_ids"]
         state_mask = batch["state_mask"]
         tactic_ids = batch["tactic_ids"]
 
         loss = self(state_ids, state_mask, tactic_ids)
-        print("loss_val", loss)
+
+        print()
+        print("loss_val", loss.detach().cpu().item())
+        print()
         self.log(f"loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
 
@@ -354,7 +357,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
 
         return tactics_with_scores
 
-class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
+class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     def __init__(
         self,
         backbone_model_name: str,
@@ -370,16 +373,37 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         length_penalty: float = 0.0,
         ret_ckpt_path: Optional[str] = None,
         skip_test_proving: bool = True,
+        skip_topk: bool = True,
     ) -> None:
+        super().__init__()
+        self.save_hyperparameters()
+        
+        self.lr = lr
+        self.warmup_steps = warmup_steps
+        self.num_beams = num_beams
+        self.length_penalty = length_penalty
+        self.eval_num_retrieved = eval_num_retrieved
+        self.eval_num_cpus = eval_num_cpus
+        self.eval_num_theorems = eval_num_theorems
+        self.max_seq_len = max_seq_len
+        
         self.num_memory_tokens = num_memory_tokens
         self.num_segments = num_segments
         self.max_nonmemory_seq_len = max_seq_len - 2 * num_memory_tokens
 
         self.skip_test_proving = skip_test_proving
-        RetrievalAugmentedGenerator.__init__(self, backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved,
+        self.skip_topk = skip_topk
+        
+        self.backbone = RetrievalAugmentedGenerator(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved,
                                              eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
                                              length_penalty, ret_ckpt_path)
-        
+        self.tokenizer = self.backbone.tokenizer
+
+        self.topk_accuracies = dict()
+        for k in range(1, num_beams + 1):
+            acc = TopkAccuracy(k)
+            self.topk_accuracies[k] = acc
+            self.add_module(f"top{k}_acc_val", acc)
 
     @classmethod
     def load(
@@ -401,12 +425,12 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         num_segments = len(state_ids)
         new_state_mask = []
         for segment in range(num_segments):
-            memory_state_shape = (state_ids[segment].shape[0], self.num_memory_tokens, self.generator.model_dim)
+            memory_state_shape = (state_ids[segment].shape[0], self.num_memory_tokens, self.backbone.generator.model_dim)
             memory_mask_shape = (state_ids[segment].shape[0], self.num_memory_tokens)
             device = state_ids[segment].device
             state_embeds.append(torch.cat((
                 torch.zeros(memory_state_shape, device=device), # read memory
-                self.generator.shared(state_ids[segment]),
+                self.backbone.generator.shared(state_ids[segment]),
                 torch.zeros(memory_state_shape, device=device), # write memory
             ), dim=-2))
             new_state_mask.append(torch.cat((
@@ -417,11 +441,13 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
 
         # Compute memory
         for segment in range(num_segments):
-            enc_out = self.generator.encoder(
+            enc_out = self.backbone.generator.encoder(
                 inputs_embeds=state_embeds[segment],
                 attention_mask=new_state_mask[segment],
             )
             if segment < num_segments - 1:
+                # print(torch.norm(enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]))
+                # print(torch.norm(enc_out['last_hidden_state'][:, -2*self.num_memory_tokens:-self.num_memory_tokens, :]))
                 state_embeds[segment + 1][:, :self.num_memory_tokens, :] = enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]
 
         return enc_out, new_state_mask[-1]
@@ -435,7 +461,7 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
         #decoder_input_ids = tactic_ids
         #decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
-        return self.generator(
+        return self.backbone.generator(
             #input_ids=decoder_input_ids,
             labels=tactic_ids,
             encoder_outputs=enc_out,
@@ -485,6 +511,11 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         # tb.add_text(f"{split}_state", f"```\n{inp}\n```", self.global_step)
         # tb.add_text(f"{split}_tactic", f"`{oup}`", self.global_step)
 
+    def configure_optimizers(self) -> Dict[str, Any]:
+        return get_optimizers(
+            self.parameters(), self.trainer, self.lr, self.warmup_steps
+        )
+
     ##############
     # Validation #
     ##############
@@ -499,23 +530,24 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         self._log_io_texts("val", state_ids, tactic_ids)
 
         # Generate topk tactic candidates via Beam Search.
-        enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
-        output = self.generator.generate(
-            encoder_outputs=enc_out,
-            attention_mask=last_enc_mask,
-            max_length=self.max_seq_len,
-            num_beams=self.num_beams,
-            do_sample=False,
-            num_return_sequences=self.num_beams,
-            early_stopping=False,
-        )
-        output_text = self.tokenizer.batch_decode(output, skip_special_tokens=True)
-        batch_size = state_ids[0].size(0)
-        assert len(output_text) == batch_size * self.num_beams
-        tactics_pred = [
-            output_text[i * self.num_beams : (i + 1) * self.num_beams]
-            for i in range(batch_size)
-        ]
+        if not self.skip_topk:
+            enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+            output = self.backbone.generator.generate(
+                encoder_outputs=enc_out,
+                attention_mask=last_enc_mask,
+                max_length=self.max_seq_len,
+                num_beams=self.num_beams,
+                do_sample=False,
+                num_return_sequences=self.num_beams,
+                early_stopping=False,
+            )
+            output_text = self.tokenizer.batch_decode(output, skip_special_tokens=True)
+            batch_size = state_ids[0].size(0)
+            assert len(output_text) == batch_size * self.num_beams
+            tactics_pred = [
+                output_text[i * self.num_beams : (i + 1) * self.num_beams]
+                for i in range(batch_size)
+            ]
 
         # tb = self.logger.experiment
         # msg = "\n".join(tactics_pred[0])
@@ -534,14 +566,14 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
 
         if not self.skip_test_proving:
             data_path = self.trainer.datamodule.data_path
-            if self.retriever is None:
+            if self.backbone.retriever is None:
                 cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
             else:
-                self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+                self.backbone.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
                 corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
                 pickle.dump(
                     IndexedCorpus(
-                        self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
+                        self.backbone.retriever.corpus, self.backbone.retriever.corpus_embeddings.cpu()
                     ),
                     open(corpus_path, "wb"),
                 )
@@ -572,6 +604,18 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
     # Prediction #
     ##############
 
+    def generate(
+        self,
+        state: str,
+        file_path: str,
+        theorem_full_name: str,
+        theorem_pos: Pos,
+        num_samples: int,
+    ) -> List[Tuple[str, float]]:
+        return self.batch_generate(
+            [state], [file_path], [theorem_full_name], [theorem_pos], num_samples
+        )[0]
+
     def batch_generate(
         self,
         state: List[str],
@@ -581,7 +625,7 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         num_samples: int,
     ) -> List[List[Tuple[str, float]]]:
         logger.debug(state)
-        assert self.retriever is not None
+        assert self.backbone.retriever is not None
         retrieved_premises, _ = self.retriever.retrieve(
             state,
             file_path,
@@ -602,7 +646,7 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
                 segments[i].append(new_segment)
                 used_premises += new_used_premises
 
-        segments.reverse() # best premises go int the end
+        segments.reverse() # best premises go in the end
 
         tokenized_state = [
             self.tokenizer(
@@ -620,7 +664,7 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
 
         # Generate tactic candidates using beam search.
-        output = self.generator.generate(
+        output = self.backbone.generator.generate(
             encoder_outputs=enc_out,
             attention_mask=last_enc_mask,
             max_length=self.max_seq_len,
