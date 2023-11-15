@@ -378,7 +378,7 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         self.num_segments = num_segments
         self.max_nonmemory_seq_len = max_seq_len - num_memory_tokens
         
-        super(RetrievalAugmentedGenerator, self).__init__(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved, 
+        super().__init__(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved, 
                                                           eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
                                                           length_penalty, ret_ckpt_path)
 
