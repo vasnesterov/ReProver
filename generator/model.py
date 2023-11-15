@@ -356,7 +356,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
 
         return tactics_with_scores
 
-class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
+class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
     def __init__(
         self,
         backbone_model_name: str,
@@ -374,35 +374,16 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         skip_test_proving: bool = True,
         skip_topk: bool = True,
     ) -> None:
-        super().__init__()
-        self.save_hyperparameters()
-        
-        self.lr = lr
-        self.warmup_steps = warmup_steps
-        self.num_beams = num_beams
-        self.length_penalty = length_penalty
-        self.eval_num_retrieved = eval_num_retrieved
-        self.eval_num_cpus = eval_num_cpus
-        self.eval_num_theorems = eval_num_theorems
-        self.max_seq_len = max_seq_len
-        
         self.num_memory_tokens = num_memory_tokens
         self.num_segments = num_segments
         self.max_nonmemory_seq_len = max_seq_len - num_memory_tokens
+        
+        super(RetrievalAugmentedGenerator, self).__init__(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved, 
+                                                          eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
+                                                          length_penalty, ret_ckpt_path)
 
         self.skip_test_proving = skip_test_proving
         self.skip_topk = skip_topk
-        
-        self.backbone = RetrievalAugmentedGenerator(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved,
-                                             eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
-                                             length_penalty, ret_ckpt_path)
-        self.tokenizer = self.backbone.tokenizer
-
-        self.topk_accuracies = dict()
-        for k in range(1, num_beams + 1):
-            acc = TopkAccuracy(k)
-            self.topk_accuracies[k] = acc
-            self.add_module(f"top{k}_acc_val", acc)
 
     @classmethod
     def load(
@@ -427,12 +408,12 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         num_segments = len(state_ids)
         new_state_mask = []
         for segment in range(num_segments):
-            memory_state_shape = (state_ids[segment].shape[0], self.num_memory_tokens, self.backbone.generator.model_dim)
+            memory_state_shape = (state_ids[segment].shape[0], self.num_memory_tokens, self.generator.model_dim)
             memory_mask_shape = (state_ids[segment].shape[0], self.num_memory_tokens)
             device = state_ids[segment].device
             state_embeds.append(torch.cat((
                 torch.zeros(memory_state_shape, device=device), # memory
-                self.backbone.generator.shared(state_ids[segment]),
+                self.generator.shared(state_ids[segment]),
             ), dim=-2))
             new_state_mask.append(torch.cat((
                 torch.ones(memory_mask_shape, device=device), # memory
@@ -442,7 +423,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         # Compute memory
         attentions = []
         for segment in range(num_segments):
-            enc_out = self.backbone.generator.encoder(
+            enc_out = self.generator.encoder(
                 inputs_embeds=state_embeds[segment],
                 attention_mask=new_state_mask[segment],
                 output_attentions=output_attentions,
@@ -471,7 +452,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         last_enc_mask = enc_dict['encoder_mask']
         #decoder_input_ids = tactic_ids
         #decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
-        out = self.backbone.generator(
+        out = self.generator(
             #input_ids=decoder_input_ids,
             labels=tactic_ids,
             encoder_outputs=enc_out,
@@ -503,14 +484,6 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         #self._log_io_texts("train", batch["state_ids"], batch["tactic_ids"])
         return loss
 
-    def on_fit_start(self) -> None:
-        if self.logger is not None:
-            self.logger.log_hyperparams(self.hparams)
-            assert self.trainer is not None
-            logger.info(f"Logging to {self.trainer.log_dir}")
-
-        self.backbone.retriever.load_corpus(self.trainer.datamodule.corpus)
-
     def _log_io_texts(
         self,
         split: str,
@@ -533,11 +506,6 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         # tb.add_text(f"{split}_state", f"```\n{inp}\n```", self.global_step)
         # tb.add_text(f"{split}_tactic", f"`{oup}`", self.global_step)
 
-    def configure_optimizers(self) -> Dict[str, Any]:
-        return get_optimizers(
-            self.parameters(), self.trainer, self.lr, self.warmup_steps
-        )
-
     ##############
     # Validation #
     ##############
@@ -554,7 +522,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         # Generate topk tactic candidates via Beam Search.
         if not self.skip_topk:
             enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
-            output = self.backbone.generator.generate(
+            output = self.generator.generate(
                 encoder_outputs=enc_out,
                 attention_mask=last_enc_mask,
                 max_length=self.max_seq_len,
@@ -588,14 +556,14 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
 
         if not self.skip_test_proving:
             data_path = self.trainer.datamodule.data_path
-            if self.backbone.retriever is None:
+            if self.retriever is None:
                 cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
             else:
-                self.backbone.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+                self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
                 corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
                 pickle.dump(
                     IndexedCorpus(
-                        self.backbone.retriever.corpus, self.backbone.retriever.corpus_embeddings.cpu()
+                        self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
                     ),
                     open(corpus_path, "wb"),
                 )
@@ -647,8 +615,8 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         num_samples: int,
     ) -> List[List[Tuple[str, float]]]:
         logger.debug(state)
-        assert self.backbone.retriever is not None
-        retrieved_premises, _ = self.backbone.retriever.retrieve(
+        assert self.retriever is not None, "RMT is meaningless without retrieval"
+        retrieved_premises, _ = self.retriever.retrieve(
             state,
             file_path,
             theorem_full_name,
@@ -686,7 +654,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
 
         # Generate tactic candidates using beam search.
-        output = self.backbone.generator.generate(
+        output = self.generator.generate(
             encoder_outputs=enc_out,
             attention_mask=last_enc_mask,
             max_length=self.max_seq_len,
