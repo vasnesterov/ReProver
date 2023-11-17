@@ -1,12 +1,14 @@
-nohup.out
+*.out
 data/
 lightning_logs/
 leandojo_rmt/
 checkpoints/
 wandb/
+~/
 pred_random.pickle
 reprover_setup.sh
 test.ipynb
+indexed_rand
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

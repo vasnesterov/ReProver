@@ -28,7 +28,7 @@ from lean_dojo.constants import LEAN3_DEPS_DIR, LEAN4_DEPS_DIR
 
 from common import zip_strict
 from prover.search_tree import *
-from generator.model import RetrievalAugmentedGenerator, FixedTacticGenerator
+from generator.model import RetrievalAugmentedGenerator, FixedTacticGenerator, RMTRetrievalAugmentedGenerator
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,6 @@ class SearchResult:
 
 class BestFirstSearchProver:
     """A prover that uses best-first search to find proofs using a tactic generator."""
-
     def __init__(
         self,
         tac_gen,  # A given tactic generator.
@@ -317,11 +316,13 @@ class CpuProver(BestFirstSearchProver):
         timeout: int,
         num_sampled_tactics: int,
         debug: bool,
+        use_RMT=False,
     ) -> None:
         if ckpt_path is None:
             tac_gen = FixedTacticGenerator(tactic, module)
         else:
-            tac_gen = RetrievalAugmentedGenerator.load(
+            tacgen_class = RMTRetrievalAugmentedGenerator if use_RMT else RetrievalAugmentedGenerator
+            tac_gen = tacgen_class.load(
                 ckpt_path, device=torch.device("cpu"), freeze=True
             )
             if tac_gen.retriever is not None:
@@ -349,11 +350,13 @@ class GpuProver(BestFirstSearchProver):
         timeout: int,
         num_sampled_tactics: int,
         debug: bool,
+        use_RMT=False,
     ) -> None:
         if ckpt_path is None:
             tac_gen = FixedTacticGenerator(tactic, module)
         else:
-            tac_gen = RetrievalAugmentedGenerator.load(
+            tacgen_class = RMTRetrievalAugmentedGenerator if use_RMT else RetrievalAugmentedGenerator
+            tac_gen = tacgen_class.load(
                 ckpt_path, device=torch.device("cuda"), freeze=True
             )
             if tac_gen.retriever is not None:
@@ -386,6 +389,7 @@ class DistributedProver:
         timeout: int,
         num_sampled_tactics: int,
         debug: Optional[bool] = False,
+        use_RMT=False,
     ) -> None:
         if ckpt_path is None:
             assert tactic and not indexed_corpus_path
@@ -397,8 +401,10 @@ class DistributedProver:
             if ckpt_path is None:
                 tac_gen = FixedTacticGenerator(tactic, module)
             else:
+                tacgen_class = RMTRetrievalAugmentedGenerator if use_RMT else RetrievalAugmentedGenerator
+                print(f"{tacgen_class=}")
                 device = torch.device("cuda") if with_gpus else torch.device("cpu")
-                tac_gen = RetrievalAugmentedGenerator.load(
+                tac_gen = tacgen_class.load(
                     ckpt_path, device=device, freeze=True
                 )
                 if tac_gen.retriever is not None:
@@ -421,6 +427,7 @@ class DistributedProver:
                     timeout=timeout,
                     num_sampled_tactics=num_sampled_tactics,
                     debug=debug,
+                    use_RMT=use_RMT,
                 )
                 for _ in range(num_cpus)
             ]
@@ -435,6 +442,7 @@ class DistributedProver:
                     timeout=timeout,
                     num_sampled_tactics=num_sampled_tactics,
                     debug=debug,
+                    use_RMT=use_RMT,
                 )
                 for _ in range(num_cpus)
             ]

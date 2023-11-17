@@ -98,6 +98,10 @@ def main() -> None:
     parser.add_argument("--name-filter", type=str)
     parser.add_argument("--num-theorems", type=int)
     parser.add_argument(
+        "--use-rmt",
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
         "--ckpt_path",
         type=str,
         help="Checkpoint of the tactic generator.",
@@ -132,6 +136,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    print("use rmt:", args.use_rmt)
+
     assert args.ckpt_path or args.tactic
 
     # Randomly generate an experiment ID if not provided.
@@ -155,6 +161,7 @@ def main() -> None:
         timeout=args.timeout,
         num_sampled_tactics=args.num_sampled_tactics,
         debug=args.verbose,
+        use_RMT=bool(args.use_rmt),
     )
     results = prover.search_unordered(repo, theorems, positions)
 
