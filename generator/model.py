@@ -323,6 +323,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         state_mask = tokenized_state.attention_mask.to(self.device)
 
         # Generate tactic candidates using beam search.
+        logger.debug(f"generation, {self.max_seq_len}")
         output = self.generator.generate(
             input_ids=state_ids,
             attention_mask=state_mask,
@@ -657,6 +658,7 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         last_enc_mask = enc_dict['encoder_mask']
 
         # Generate tactic candidates using beam search.
+        print(f"generation, {self.max_seq_len}")
         output = self.generator.generate(
             encoder_outputs=enc_out,
             attention_mask=last_enc_mask,
