@@ -27,7 +27,8 @@ class RetrievalDataset(Dataset):
         num_negatives: int,
         num_in_file_negatives: int,
         max_seq_len: int,
-        tokenizer,
+        context_tokenizer,
+        premise_tokenizer,
         is_train: bool,
     ) -> None:
         super().__init__()
@@ -35,7 +36,8 @@ class RetrievalDataset(Dataset):
         self.num_negatives = num_negatives
         self.num_in_file_negatives = num_in_file_negatives
         self.max_seq_len = max_seq_len
-        self.tokenizer = tokenizer
+        self.context_tokenizer = context_tokenizer
+        self.premise_tokenizer = premise_tokenizer
         self.is_train = is_train
         self.data = list(
             itertools.chain.from_iterable(self._load_data(path) for path in data_paths)
@@ -133,7 +135,7 @@ class RetrievalDataset(Dataset):
 
         # Tokenize the context.
         context = [ex["context"] for ex in examples]
-        tokenized_context = self.tokenizer(
+        tokenized_context = self.context_tokenizer(
             [c.serialize() for c in context],
             padding="longest",
             max_length=self.max_seq_len,
@@ -147,7 +149,7 @@ class RetrievalDataset(Dataset):
         # Tokenize the label and premises.
         if self.is_train:
             pos_premise = [ex["pos_premise"] for ex in examples]
-            tokenized_pos_premise = self.tokenizer(
+            tokenized_pos_premise = self.premise_tokenizer(
                 [p.serialize() for p in pos_premise],
                 padding="longest",
                 max_length=self.max_seq_len,
@@ -180,7 +182,7 @@ class RetrievalDataset(Dataset):
 
             for i in range(self.num_negatives):
                 neg_premise = [ex["neg_premises"][i] for ex in examples]
-                tokenized_neg_premise = self.tokenizer(
+                tokenized_neg_premise = self.premise_tokenizer(
                     [p.serialize() for p in neg_premise],
                     padding="longest",
                     max_length=self.max_seq_len,
@@ -206,7 +208,8 @@ class RetrievalDataModule(pl.LightningDataModule):
         corpus_path: str,
         num_negatives: int,
         num_in_file_negatives: int,
-        model_name: str,
+        context_tokenizer_name: str,
+        premise_tokenizer_name: str,
         batch_size: int,
         eval_batch_size: int,
         max_seq_len: int,
@@ -222,7 +225,12 @@ class RetrievalDataModule(pl.LightningDataModule):
         self.max_seq_len = max_seq_len
         self.num_workers = num_workers
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.context_tokenizer = AutoTokenizer.from_pretrained(context_tokenizer_name)
+        self.premise_tokenizer = AutoTokenizer.from_pretrained(premise_tokenizer_name)
+        if self.context_tokenizer.pad_token is None:
+            self.context_tokenizer.pad_token = self.context_tokenizer.unk_token
+        if self.premise_tokenizer.pad_token is None:
+            self.premise_tokenizer.pad_token = self.premise_tokenizer.unk_token
         self.corpus = Corpus(corpus_path)
 
         metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
@@ -241,7 +249,8 @@ class RetrievalDataModule(pl.LightningDataModule):
                 self.num_negatives,
                 self.num_in_file_negatives,
                 self.max_seq_len,
-                self.tokenizer,
+                self.context_tokenizer,
+                self.premise_tokenizer,
                 is_train=True,
             )
 
@@ -253,7 +262,8 @@ class RetrievalDataModule(pl.LightningDataModule):
                 self.num_negatives,
                 self.num_in_file_negatives,
                 self.max_seq_len,
-                self.tokenizer,
+                self.context_tokenizer,
+                self.premise_tokenizer,
                 is_train=False,
             )
 
@@ -268,7 +278,8 @@ class RetrievalDataModule(pl.LightningDataModule):
                 self.num_negatives,
                 self.num_in_file_negatives,
                 self.max_seq_len,
-                self.tokenizer,
+                self.context_tokenizer,
+                self.premise_tokenizer,
                 is_train=False,
             )
 

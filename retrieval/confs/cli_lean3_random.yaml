@@ -9,6 +9,7 @@ trainer:
       stage: 2
       offload_optimizer: false
       cpu_checkpointing: false
+  accumulate_grad_batches: 4
   gradient_clip_val: 1.0
   max_steps: 500000
   callbacks:
@@ -30,7 +31,14 @@ trainer:
         verbose: true
 
 model:
-  model_name: kaiyuy/leandojo-lean3-retriever-byt5-small
+  context_model:
+      class_path: retrieval.model_2encoders.T5Seq2VecModel
+      init_args:
+          model_name: kaiyuy/leandojo-lean3-retriever-byt5-small
+  premise_model:
+      class_path: retrieval.model_2encoders.LLaMaSeq2VecModel
+      init_args:
+          model_name: EleutherAI/llemma_7b
   lr: 2e-4
   warmup_steps: 2000
   num_retrieved: 100
@@ -40,7 +48,9 @@ data:
   corpus_path: data/leandojo_benchmark/corpus.jsonl
   num_negatives: 3
   num_in_file_negatives: 1
-  batch_size: 12
-  eval_batch_size: 128
+  context_tokenizer_name: kaiyuy/leandojo-lean3-retriever-byt5-small
+  premise_tokenizer_name: EleutherAI/llemma_7b
+  batch_size: 2
+  eval_batch_size: 32
   max_seq_len: 1024
-  num_workers: 4
+  num_workers: 8
