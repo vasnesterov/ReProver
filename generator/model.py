@@ -200,8 +200,6 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         tactic_ids = batch["tactic_ids"]
 
         loss = self(state_ids, state_mask, tactic_ids)
-        print(f"{loss=}")
-        return
 
         self.log(f"loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
@@ -239,40 +237,40 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         self.trainer.save_checkpoint(ckpt_path)
         logger.info(f"Saved checkpoint to {ckpt_path}")
 
-        data_path = self.trainer.datamodule.data_path
-        if self.retriever is None:
-            cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
-        else:
-            self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
-            corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
-            pickle.dump(
-                IndexedCorpus(
-                    self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
-                ),
-                open(corpus_path, "wb"),
-            )
-            cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path} --indexed-corpus-path {corpus_path}"
+        # data_path = self.trainer.datamodule.data_path
+        # if self.retriever is None:
+        #     cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
+        # else:
+        #     self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+        #     corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
+        #     pickle.dump(
+        #         IndexedCorpus(
+        #             self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
+        #         ),
+        #         open(corpus_path, "wb"),
+        #     )
+        #     cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path} --indexed-corpus-path {corpus_path}"
 
-        logger.info(cmd)
+        # logger.info(cmd)
 
-        wait_time = 3600
-        while True:
-            try:
-                _, err = execute(cmd, capture_output=True)
-                break
-            except CalledProcessError as ex:
-                logger.error(ex)
-                logger.error(
-                    f"Failed to evaluate. Retrying in {wait_time / 3600} hour..."
-                )
-                time.sleep(wait_time)
-                wait_time *= 2
+        # wait_time = 3600
+        # while True:
+        #     try:
+        #         _, err = execute(cmd, capture_output=True)
+        #         break
+        #     except CalledProcessError as ex:
+        #         logger.error(ex)
+        #         logger.error(
+        #             f"Failed to evaluate. Retrying in {wait_time / 3600} hour..."
+        #         )
+        #         time.sleep(wait_time)
+        #         wait_time *= 2
 
-        m = re.search(r"Pass@1: (\S+)", err)
-        assert m is not None, err
-        acc = float(m.group(1))
-        self.log("Pass@1_val", acc, on_step=False, on_epoch=True)
-        logger.info(f"Pass@1: {acc}")
+        # m = re.search(r"Pass@1: (\S+)", err)
+        # assert m is not None, err
+        # acc = float(m.group(1))
+        # self.log("Pass@1_val", acc, on_step=False, on_epoch=True)
+        # logger.info(f"Pass@1: {acc}")
 
     ##############
     # Prediction #
@@ -374,7 +372,7 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         length_penalty: float = 0.0,
         ret_ckpt_path: Optional[str] = None,
         skip_test_proving: bool = True,
-        skip_topk: bool = True,
+        skip_topk: bool = False,
     ) -> None:
         self.num_memory_tokens = num_memory_tokens
         self.num_segments = num_segments
@@ -383,6 +381,9 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         super().__init__(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved, 
                                                           eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
                                                           length_penalty, ret_ckpt_path)
+
+        self.memory_emb = torch.nn.Embedding(self.num_memory_tokens, self.generator.model_dim)
+        # self.memory_linear = torch.nn.Linear(self.generator.model_dim, self.generator.model_dim, bias=True)
 
         self.skip_test_proving = skip_test_proving
         self.skip_topk = skip_topk
@@ -409,12 +410,14 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         state_embeds = []
         num_segments = len(state_ids)
         new_state_mask = []
+        batch_size = state_ids[0].shape[0]
         for segment in range(num_segments):
-            memory_state_shape = (state_ids[segment].shape[0], self.num_memory_tokens, self.generator.model_dim)
-            memory_mask_shape = (state_ids[segment].shape[0], self.num_memory_tokens)
+            memory_state_shape = (batch_size, self.num_memory_tokens, self.generator.model_dim)
+            memory_mask_shape = (batch_size, self.num_memory_tokens)
             device = state_ids[segment].device
             state_embeds.append(torch.cat((
-                torch.zeros(memory_state_shape, device=device), # memory
+                #torch.zeros(memory_state_shape, device=device), # memory: zeros
+                self.memory_emb.weight.repeat(batch_size, 1, 1),  # memory: trainable embedding
                 self.generator.shared(state_ids[segment]),
             ), dim=-2))
             new_state_mask.append(torch.cat((
@@ -523,7 +526,9 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
 
         # Generate topk tactic candidates via Beam Search.
         if not self.skip_topk:
-            enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+            enc_dict = self._encode_with_memory(state_ids, state_mask)
+            enc_out = enc_dict['encoder_output']
+            last_enc_mask = enc_dict['encoder_mask']
             output = self.generator.generate(
                 encoder_outputs=enc_out,
                 attention_mask=last_enc_mask,
@@ -541,20 +546,20 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
                 for i in range(batch_size)
             ]
 
-        # tb = self.logger.experiment
-        # msg = "\n".join(tactics_pred[0])
-        # tb.log({"preds_val": msg}\n```", self.global_step)
-
-        # # Log the topk accuracies.
-        # for k in range(1, self.num_beams + 1):
-        #     topk_acc = self.topk_accuracies[k]
-        #     topk_acc(tactics_pred, batch["tactic"])
-        #     self.log(f"top{k}_acc_val", topk_acc, on_step=False, on_epoch=True)
+            # tb = self.logger.experiment
+            # msg = "\n".join(tactics_pred[0])
+            # tb.log({"preds_val": msg}, self.global_step)
+    
+            # Log the topk accuracies.
+            for k in range(1, self.num_beams + 1):
+                topk_acc = self.topk_accuracies[k]
+                topk_acc(tactics_pred, batch["tactic"])
+                self.log(f"top{k}_acc_val", topk_acc, on_step=False, on_epoch=True)
 
     def on_validation_epoch_end(self) -> None:
-        ckpt_path = f"{self.trainer.log_dir}/checkpoints/last.ckpt"
-        self.trainer.save_checkpoint(ckpt_path)
-        logger.info(f"Saved checkpoint to {ckpt_path}")
+        # ckpt_path = f"{self.trainer.log_dir}/checkpoints/last.ckpt"
+        # self.trainer.save_checkpoint(ckpt_path)
+        # logger.info(f"Saved checkpoint to {ckpt_path}")
 
         if not self.skip_test_proving:
             data_path = self.trainer.datamodule.data_path
