@@ -696,6 +696,9 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
 
         return tactics_with_scores
 
+# class TwoHeadRMTRetrievalAugmentedGenerator(RMTRetrievalAugmentedGenerator):
+    
+
 class GPT4TacticGenerator(TacticGenerator):
     def __init__(
         self,

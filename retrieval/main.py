@@ -5,7 +5,7 @@ import os
 from loguru import logger
 from pytorch_lightning.cli import LightningCLI
 
-from retrieval.model_2encoders import TwoEncoderPremiseRetriever
+from retrieval.model import PremiseRetriever
 from retrieval.datamodule import RetrievalDataModule
 
 
@@ -17,7 +17,7 @@ class CLI(LightningCLI):
 
 def main() -> None:
     logger.info(f"PID: {os.getpid()}")
-    cli = CLI(TwoEncoderPremiseRetriever, RetrievalDataModule)
+    cli = CLI(ColbertPremiseRetriever, RetrievalDataModule)
     logger.info("Configuration: \n", cli.config)
 
 

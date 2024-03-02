@@ -52,5 +52,5 @@ data:
   premise_tokenizer_name: EleutherAI/llemma_7b
   batch_size: 2
   eval_batch_size: 32
-  max_seq_len: 1024
+  max_seq_len: 128
   num_workers: 8
