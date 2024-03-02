@@ -6,6 +6,7 @@ import ray
 import time
 import heapq
 import torch
+import asyncio
 from lean_dojo import (
     Pos,
     Dojo,
@@ -24,7 +25,6 @@ from loguru import logger
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from ray.util.actor_pool import ActorPool
-from lean_dojo.constants import LEAN3_DEPS_DIR, LEAN4_DEPS_DIR
 
 from common import zip_strict
 from prover.search_tree import *
@@ -206,13 +206,7 @@ class BestFirstSearchProver:
         path = str(self.theorem.file_path)
 
         if self.theorem.repo != self.repo:
-            if self.theorem.repo.uses_lean3:
-                path = os.path.join(LEAN3_DEPS_DIR, self.theorem.repo.name, path)
-            elif self.theorem.repo.is_lean:
-                raise NotImplementedError
-                path = os.path.join(LEAN4_DEPS_DIR, "lean4", path)
-            else:
-                path = os.path.join(LEAN4_DEPS_DIR, self.theorem.repo.name, path)
+            path = self.theorem.repo.get_packages_dir() / self.theorem.repo.name / path
 
         suggestions = self.tac_gen.generate(
             state=ts,
@@ -370,6 +364,85 @@ class GpuProver(BestFirstSearchProver):
             debug,
         )
 
+@ray.remote(num_gpus=1)
+class AsyncGpuProxy:
+    """Auxilary actor that is responsible for the model on GPU."""
+
+    def __init__(
+        self,
+        ckpt_path: str,
+        indexed_corpus_path: Optional[str],
+        use_RMT=False,
+    ) -> None:
+        model_class = RMTRetrievalAugmentedGenerator if use_RMT else RetrievalAugmentedGenerator
+        self.model = model_class.load(
+            ckpt_path, device=torch.device("cuda"), freeze=True
+        )
+        if self.model.retriever is not None:
+            if indexed_corpus_path is not None:
+                self.model.retriever.load_corpus(indexed_corpus_path)
+            self.model.retriever.reindex_corpus(batch_size=32)
+
+    def generate(self, *args, **kwargs):
+        logger.debug(f"generate({args=}, {kwargs=})")
+        return self.model.generate(*args, **kwargs)
+
+@ray.remote
+class AsyncGpuScheduler:
+    """Ray actor for scheduling tasks from GpuProvers to GPU using queue"""
+
+    def __init__(
+        self,
+        num_provers: int,
+        gpu_proxy: AsyncGpuProxy,
+    ) -> None:
+        self.queue = []
+        self.gpu_proxy = gpu_proxy
+
+    async def generate(self, *args, **kwargs):
+        out_future = asyncio.Future()
+        self.queue.append((args, kwargs, out_future))
+        output = await out_future
+        return output
+
+    async def run_main_loop(self):
+        while True:
+            if len(self.queue) == 0:
+                logger.debug("GPU is waiting")
+                await asyncio.sleep(1)
+                continue
+            args, kwargs, out_future = self.queue.pop(0)
+            output = await self.gpu_proxy.generate.remote(*args, **kwargs)
+            out_future.set_result(output)
+
+@ray.remote
+class AsyncGpuProver(BestFirstSearchProver):
+    """Ray actor for running an instance of `BestFirstSearchProver` on a GPU in asynchronous way."""
+
+    class _Remote_Wrapper:
+        def __init__(self, tac_gen):
+            self.tac_gen = tac_gen
+
+        def generate(self, *args, **kwargs):
+            return ray.get(self.tac_gen.generate.remote(*args, **kwargs))
+            
+    
+    def __init__(
+        self,
+        tac_gen: AsyncGpuScheduler,
+        timeout: int,
+        num_sampled_tactics: int,
+        debug: bool,
+        use_RMT=False,
+    ) -> None:
+        wrapped_tac_gen = self._Remote_Wrapper(tac_gen)
+        
+        super().__init__(
+            wrapped_tac_gen,
+            timeout,
+            num_sampled_tactics,
+            debug,
+        )
 
 class DistributedProver:
     """A distributed prover that uses Ray to parallelize the proof search.
@@ -390,6 +463,7 @@ class DistributedProver:
         num_sampled_tactics: int,
         debug: Optional[bool] = False,
         use_RMT=False,
+        shared_gpu=False,
     ) -> None:
         if ckpt_path is None:
             assert tactic and not indexed_corpus_path
@@ -415,22 +489,47 @@ class DistributedProver:
             )
             return
 
+        #ray.init(_memory=200 * 1024**3, object_store_memory=100 * 1024**3) # 100 GB
         ray.init()
         if with_gpus:
             logger.info(f"Launching {num_cpus} GPU workers.")
-            provers = [
-                GpuProver.remote(
+            if not shared_gpu:
+                logger.info(f"GPU is not shared among workers.")
+                provers = [
+                    GpuProver.remote(
+                        ckpt_path,
+                        indexed_corpus_path,
+                        tactic,
+                        module,
+                        timeout=timeout,
+                        num_sampled_tactics=num_sampled_tactics,
+                        debug=debug,
+                        use_RMT=use_RMT,
+                    )
+                    for _ in range(num_cpus)
+                ]
+            else:
+                logger.info(f"GPU is shared among workers.")
+                gpu_proxy = AsyncGpuProxy.remote(
                     ckpt_path,
                     indexed_corpus_path,
-                    tactic,
-                    module,
-                    timeout=timeout,
-                    num_sampled_tactics=num_sampled_tactics,
-                    debug=debug,
                     use_RMT=use_RMT,
                 )
-                for _ in range(num_cpus)
-            ]
+                tac_gen = AsyncGpuScheduler.remote(
+                    num_cpus, 
+                    gpu_proxy,
+                )
+                tac_gen.run_main_loop.remote()
+                provers = [
+                    AsyncGpuProver.remote(
+                        tac_gen=tac_gen,
+                        timeout=timeout,
+                        num_sampled_tactics=num_sampled_tactics,
+                        debug=debug,
+                        use_RMT=use_RMT,
+                    )
+                    for _ in range(num_cpus)
+                ]
         else:
             logger.info(f"Launching {num_cpus} CPU workers.")
             provers = [

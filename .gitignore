@@ -5,7 +5,8 @@ leandojo_rmt/
 checkpoints/
 wandb/
 ~/
-pred_random.pickle
+to_valid/
+*.pickle
 reprover_setup.sh
 test.ipynb
 indexed_rand
