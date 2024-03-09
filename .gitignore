@@ -3,6 +3,7 @@ data/
 lightning_logs/
 leandojo_rmt/
 checkpoints/
+experiments/
 wandb/
 ~/
 to_valid/
