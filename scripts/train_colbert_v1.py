@@ -1,4 +1,4 @@
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 
 from colbert import Trainer
 from colbert.infra import ColBERTConfig, Run, RunConfig
