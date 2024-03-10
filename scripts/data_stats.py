@@ -1,14 +1,15 @@
 """Scripts for computing some simple statistics about the data."""
-import json
-import argparse
-import numpy as np
-from tqdm import tqdm
-from pathlib import Path
-from loguru import logger
-from lean_dojo import Pos
-from collections import defaultdict
 
-from common import Corpus
+import argparse
+import json
+from collections import defaultdict
+from pathlib import Path
+
+import numpy as np
+from lean_dojo import Pos
+from loguru import logger
+from reprover.common import Corpus
+from tqdm import tqdm
 
 
 def main() -> None:
@@ -51,13 +52,9 @@ def main() -> None:
     logger.info(f"Number of tactics with premises: {len(tactics_with_premises)}")
 
     avg_premises_per_tactic = np.mean([t.count("</a>") for t in tactics_with_premises])
-    logger.info(
-        f"Average number of premises per tactic (among those with premises): {avg_premises_per_tactic}"
-    )
+    logger.info(f"Average number of premises per tactic (among those with premises): {avg_premises_per_tactic}")
 
-    logger.info(
-        f"Average number of accessed premises per theorem: {np.mean(num_accessed_premises)}"
-    )
+    logger.info(f"Average number of accessed premises per theorem: {np.mean(num_accessed_premises)}")
 
     logger.info(f"Number of theorems by topic: {num_theorems_by_topic}")
 

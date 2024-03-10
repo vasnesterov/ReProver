@@ -1,10 +1,9 @@
-import os 
-
-import json
 import argparse
+import json
 from glob import glob
+
+from lean_dojo import LeanGitRepo, is_available_in_cache, trace
 from loguru import logger
-from lean_dojo import LeanGitRepo, trace, is_available_in_cache
 
 
 def main() -> None:

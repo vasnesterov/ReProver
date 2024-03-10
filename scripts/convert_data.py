@@ -5,10 +5,10 @@ from typing import List, Optional, Tuple, Union
 import jsonlines
 import pandas as pd
 import tqdm
-from common import Context, Corpus, Premise
 from jsonargparse import ArgumentParser
 from jsonargparse.typing import Path_fc, Path_fr
-from retrieval.datamodule import RetrievalDataset
+from reprover.common import Context, Corpus, Premise
+from reprover.retrieval.datamodule import RetrievalDataset
 
 
 class PremiseOrQueryDataset:

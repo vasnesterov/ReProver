@@ -8,7 +8,7 @@ setup(
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
-        "ColBERT @ git+https://github.com/yeahrmek/ColBERT",
+        # "colbert-ai @ git+https://github.com/yeahrmek/ColBERT",
         "jsonargparse>=4.27.0",
     ],
 )
