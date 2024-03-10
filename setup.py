@@ -10,5 +10,7 @@ setup(
     install_requires=[
         # "colbert-ai @ git+https://github.com/yeahrmek/ColBERT",
         "jsonargparse>=4.27.0",
+        "faiss-gpu",
+        "lean-dojo"
     ],
 )

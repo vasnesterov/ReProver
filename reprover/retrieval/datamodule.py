@@ -45,7 +45,9 @@ class RetrievalDataset(Dataset):
         self.context_tokenizer = context_tokenizer
         self.premise_tokenizer = premise_tokenizer
         self.is_train = is_train
-        self.data = list(itertools.chain.from_iterable(self._load_data(path) for path in data_paths))
+        self.data = list(
+            itertools.chain.from_iterable(self._load_data(path) for path in data_paths)
+        )
 
     def _load_data(self, data_path: str) -> List[Example]:
         data = []
@@ -56,8 +58,12 @@ class RetrievalDataset(Dataset):
 
             for i, tac in enumerate(thm["traced_tactics"]):
                 state = format_state(tac["state_before"])
-                context = Context(file_path, thm["full_name"], Pos(*thm["start"]), state)
-                all_pos_premises = get_all_pos_premises(tac["annotated_tactic"], self.corpus)
+                context = Context(
+                    file_path, thm["full_name"], Pos(*thm["start"]), state
+                )
+                all_pos_premises = get_all_pos_premises(
+                    tac["annotated_tactic"], self.corpus
+                )
 
                 if self.is_train:
                     # In training, we ignore tactics that do not have any premises.
@@ -115,13 +121,17 @@ class RetrievalDataset(Dataset):
 
         for p in self.corpus.transitive_dep_graph.successors(ex["context"].path):
             if p == ex["pos_premise"].path:
-                premises_in_file += [_p for _p in self.corpus.get_premises(p) if _p != ex["pos_premise"]]
+                premises_in_file += [
+                    _p for _p in self.corpus.get_premises(p) if _p != ex["pos_premise"]
+                ]
             else:
                 premises_outside_file += self.corpus.get_premises(p)
 
         num_in_file_negatives = min(len(premises_in_file), self.num_in_file_negatives)
 
-        ex["neg_premises"] = random.sample(premises_in_file, num_in_file_negatives) + random.sample(
+        ex["neg_premises"] = random.sample(
+            premises_in_file, num_in_file_negatives
+        ) + random.sample(
             premises_outside_file, self.num_negatives - num_in_file_negatives
         )
         return ex
@@ -166,7 +176,9 @@ class RetrievalDataset(Dataset):
                     if k < batch_size:
                         pos_premise_k = examples[k]["pos_premise"]
                     else:
-                        pos_premise_k = examples[k % batch_size]["neg_premises"][k // batch_size - 1]
+                        pos_premise_k = examples[k % batch_size]["neg_premises"][
+                            k // batch_size - 1
+                        ]
                     label[j, k] = float(pos_premise_k in all_pos_premises)
 
             batch["label"] = label
@@ -263,7 +275,10 @@ class RetrievalDataModule(pl.LightningDataModule):
 
         if stage in (None, "fit", "predict"):
             self.ds_pred = RetrievalDataset(
-                [os.path.join(self.data_path, f"{split}.json") for split in ("train", "val", "test")],
+                [
+                    os.path.join(self.data_path, f"{split}.json")
+                    for split in ("train", "val", "test")
+                ],
                 self.uses_lean4,
                 self.corpus,
                 self.num_negatives,
