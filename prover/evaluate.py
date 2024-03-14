@@ -13,11 +13,12 @@ from typing import List, Tuple, Optional
 from lean_dojo import LeanGitRepo, Theorem, Pos, is_available_in_cache
 
 from common import set_logger
-from prover.proof_search import Status, DistributedProver
+
 # from prover.proof_search import Status, DistributedProver
 from prover.proof_search_fast import Status, DistributedProver
+# from prover.trace import Status, DistributedProver
 
-
+def _get_theorems(args) -> Tuple[LeanGitRepo, List[Theorem], List[Pos]]:
 def _get_theorems(
     data_path: str,
     split: str,
@@ -84,6 +85,68 @@ def _get_theorems_from_files(
 
     return repo, theorems, positions
 
+# TODO: make args as in original
+def _get_theorems_with_tactics(args) -> Tuple[LeanGitRepo, List[Theorem], List[Pos], List[str]]:
+    repo, theorems, positions, tactics = _get_theorems_tactics_from_files(
+        args.data_path,
+        args.split,
+        args.file_path,
+        args.full_name,
+        args.name_filter,
+        args.num_theorems,
+    )
+
+    all_repos = {thm.repo for thm in theorems}
+    for r in all_repos:
+        assert is_available_in_cache(
+            r
+        ), f"{r} has not been traced yet. Please use LeanDojo to trace it so that it's available in the cache."
+
+    return repo, theorems, positions, tactics
+
+def _get_theorems_tactics_from_files(
+    data_path: str,
+    split: str,
+    file_path: Optional[str],
+    full_name: Optional[str],
+    name_filter: Optional[str],
+    num_theorems: Optional[int],
+) -> Tuple[LeanGitRepo, List[Theorem], List[Pos], List[List[str]]]:
+    data = json.load(open(os.path.join(data_path, f"{split}.json")))
+    theorems = []
+    positions = []
+    tactics = []
+
+    for t in data:
+        if file_path is not None and t["file_path"] != file_path:
+            continue
+        if full_name is not None and t["full_name"] != full_name:
+            continue
+        if name_filter is not None and not hashlib.md5(
+            t["full_name"].encode()
+        ).hexdigest().startswith(name_filter):
+            continue
+        
+        repo = LeanGitRepo(t["url"], t["commit"])
+        theorems.append(Theorem(repo, t["file_path"], t["full_name"]))
+        positions.append(Pos(*t["start"]))
+        tactics.append([tac['tactic'] for tac in t['traced_tactics']])
+    # theorems = sorted(
+    #     theorems,
+    #     key=lambda t: hashlib.md5(
+    #         (str(t.file_path) + ":" + t.full_name).encode()
+    #     ).hexdigest(),
+    # )
+    if num_theorems is not None:
+        theorems = theorems[:num_theorems]
+        positions = positions[:num_theorems]
+        tactics = tactics[:num_theorems]
+    logger.info(f"{len(theorems)} theorems loaded from {data_path}")
+
+    metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
+    repo = LeanGitRepo(metadata["from_repo"]["url"], metadata["from_repo"]["commit"])
+
+    return repo, theorems, positions, tactics
 
 def evaluate(
     data_path: str,
@@ -155,19 +218,18 @@ def evaluate(
 
     return pass_1
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Script for evaluating the prover on theorems extracted by LeanDojo."
     )
-
+    parser.add_argument("--exp-id", type=str, help="Experiment ID used for logging.")
     parser.add_argument(
         "--data-path",
         type=str,
         required=True,
         help="Path to the data extracted by LeanDojo (e.g., data/leandojo_benchmark/random).",
     )
-    parser.add_argument("--exp-id", type=str, help="Experiment ID used for logging.")
+
     parser.add_argument(
         "--split",
         type=str,
@@ -221,11 +283,15 @@ def main() -> None:
 
     assert args.ckpt_path or args.tactic
 
+    # Randomly generate an experiment ID if not provided.
+    if args.exp_id is None:
+        args.exp_id = str(uuid.uuid4())
 
+    set_logger(args.verbose)
     logger.info(f"PID: {os.getpid()}")
     logger.info(args)
 
-    pass_1 = evaluate(
+    repo, theorems, positions = _get_theorems(args)
         args.data_path,
         args.exp_id,
         args.split,
@@ -237,17 +303,16 @@ def main() -> None:
         args.indexed_corpus_path,
         args.tactic,
         args.module,
-        args.num_sampled_tactics,
-        args.timeout,
-        args.num_cpus,
-        args.with_gpus,
-        args.verbose,
+        num_cpus=args.num_cpus,
+        with_gpus=args.with_gpus,
+        timeout=args.timeout,
+        num_sampled_tactics=args.num_sampled_tactics,
+        debug=args.verbose,
         use_RMT=args.use_rmt,
-        shared_gpu=args.shared_gpu
+        shared_gpu=args.shared_gpu,
     )
 
     logger.info(f"Pass@1: {pass_1}")
-
 
 if __name__ == "__main__":
     main()
