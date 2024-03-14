@@ -2,6 +2,7 @@
 import os
 import json
 import pickle
+import random
 from tqdm import tqdm
 from loguru import logger
 import pytorch_lightning as pl
@@ -33,6 +34,7 @@ class GeneratorDataset(Dataset):
         normalize_tactics: bool,
         tokenizer: ByT5Tokenizer,
         is_train: bool,
+        is_raw_data: bool = False,
     ) -> None:
         super().__init__()
         self.corpus = corpus
@@ -42,7 +44,10 @@ class GeneratorDataset(Dataset):
         self.p_drop = p_drop
         self.tokenizer = tokenizer
         self.is_train = is_train
-        self.data = self._load_data(data_path, normalize_tactics)
+        if is_raw_data: 
+            self.data = self._load_raw_data(data_path)
+        else:
+            self.data = self._load_data(data_path, normalize_tactics)
 
     def _load_data(self, data_path: str, normalize_tactics: bool) -> List[Example]:
         data = []
@@ -67,6 +72,9 @@ class GeneratorDataset(Dataset):
 
         logger.info(f"{len(data)} examples loaded")
         return data
+
+    def _load_raw_data(self, data_path: str) -> List[Example]:
+        return json.load(open(data_path))
 
     def __len__(self) -> int:
         return len(self.data)
@@ -234,10 +242,12 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
         normalize_tactics: bool,
         tokenizer: ByT5Tokenizer,
         is_train: bool,
+        p_only_memory: float = 0.0
     ) -> None:
         GeneratorDataset.__init__(self, data_path, corpus, keep_marks, preds, max_seq_len,
                                                        p_drop, normalize_tactics, tokenizer, is_train)
         self.num_segments = num_segments
+        self.p_only_memory = p_only_memory
 
     def __getitem__(self, idx: int) -> Example:
         ex = self.data[idx].copy()
@@ -247,8 +257,14 @@ class MultipleSegmentGeneratorDataset(GeneratorDataset):
         file_path = ex["file_path"]
         pred = self.preds[(file_path, ex["full_name"], ex["state"])]
 
+        num_segments = self.num_segments
+
+        if self.is_train and random.random() < self.p_only_memory:
+            num_segments -= 1
+            segments.append(format_state("<placeholder>")) # it will be the last segment after reverse
+        
         used_premises = 0
-        for i in range(self.num_segments):
+        for i in range(num_segments):
             new_segment, new_used_premises = _format_augmented_state(
                 ex["state"],
                 pred["retrieved_premises"][used_premises:],
@@ -319,6 +335,7 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
         p_drop: float,
         normalize_tactics: bool,
         num_workers: int,
+        p_only_memory: float = 0.0,
         corpus_path: Optional[str] = None,
         preds_path: Optional[str] = None,
     ) -> None:
@@ -337,6 +354,8 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
         self.normalize_tactics = normalize_tactics
         self.num_workers = num_workers
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        self.p_only_memory = p_only_memory
 
         if preds_path is None:
             logger.info("Without retrieval data")
@@ -364,6 +383,7 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
                 self.normalize_tactics,
                 self.tokenizer,
                 is_train=True,
+                p_only_memory=self.p_only_memory
             )
 
         if stage in (None, "fit", "validate"):
@@ -378,6 +398,7 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
                 self.normalize_tactics,
                 self.tokenizer,
                 is_train=False,
+                p_only_memory=self.p_only_memory
             )
 
     def train_dataloader(self) -> DataLoader:
@@ -401,3 +422,198 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
             pin_memory=True,
             drop_last=False,
         )
+
+
+# class TwoHeadMultipleSegmentGeneratorDataset(GeneratorDataset):
+#     def __init__(
+#         self,
+#         data_path: str,
+#         corpus: Corpus,
+#         keep_marks: bool,
+#         preds: List[Dict[str, Any]],
+#         max_seq_len: int, # now it is the maximum length of one segment
+#         num_segments: int,
+#         p_drop: float,
+#         normalize_tactics: bool,
+#         tokenizer: ByT5Tokenizer,
+#         is_train: bool,
+#         p_only_memory: float = 0.0
+#     ) -> None:
+#         GeneratorDataset.__init__(self, data_path, corpus, keep_marks, preds, max_seq_len,
+#                                                        p_drop, normalize_tactics, tokenizer, is_train)
+#         self.num_segments = num_segments
+#         self.p_only_memory = p_only_memory
+
+#     def __getitem__(self, idx: int) -> Example:
+#         ex = self.data[idx].copy()
+
+#         segments = []
+#         assert self.preds is not None
+#         file_path = ex["file_path"]
+#         pred = self.preds[(file_path, ex["full_name"], ex["state"])]
+
+#         num_segments = self.num_segments
+
+#         if self.is_train and random.random() < self.p_only_memory:
+#             num_segments -= 1
+#             segments.append(format_state("<placeholder>")) # it will be the last segment after reverse
+        
+#         used_premises = 0
+#         for i in range(num_segments):
+#             new_segment, new_used_premises = _format_augmented_state(
+#                 ex["state"],
+#                 pred["retrieved_premises"][used_premises:],
+#                 self.max_seq_len,
+#                 self.p_drop if self.is_train else 0.0,
+#             )
+#             segments.append(new_segment)
+#             used_premises += new_used_premises
+
+#         if not self.keep_marks:
+#             segments = [remove_marks(segment) for segment in segments]
+
+#         segments.reverse() # best premises go last
+#         ex["state"] = segments.copy()
+#         return ex
+
+#     def collate(self, examples: List[Example]) -> Batch:
+#         # examples[example][segment] -> {"state_ids": list[segment][example]]}
+#         state = [[ex["state"][segment] for ex in examples] for segment in range(self.num_segments)]
+#         tokenized_state = []
+#         for segment in range(self.num_segments):
+#             tokenized_state.append(
+#                 self.tokenizer(
+#                     state[segment],
+#                     padding="longest",
+#                     max_length=self.max_seq_len,
+#                     truncation=True,
+#                     return_tensors="pt",
+#                 )
+#             )
+
+#         tactic = [ex["tactic"] for ex in examples] # tactic in different segments is the same
+#         tokenized_tactic = self.tokenizer(
+#             tactic,
+#             padding="longest",
+#             max_length=self.max_seq_len,
+#             truncation=True,
+#             return_tensors="pt",
+#         )
+#         tactic_ids = tokenized_tactic.input_ids
+#         tactic_ids[tactic_ids == self.tokenizer.pad_token_id] = -100
+        
+#         batch = {}
+#         batch["state"] = state
+#         batch["state_ids"] = [t.input_ids for t in tokenized_state]
+#         batch["state_mask"] = [t.attention_mask for t in tokenized_state]
+#         batch["tactic"] = tactic
+#         batch["tactic_ids"] = tactic_ids
+#         batch["tactic_mask"] = tokenized_tactic.attention_mask
+
+#         # Copy other fields.
+#         for k in examples[0].keys():
+#             if k not in batch:
+#                 batch[k] = [ex[k] for ex in examples]
+
+#         return batch
+
+# class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
+#     def __init__(
+#         self,
+#         data_path: str,
+#         keep_marks: bool,
+#         model_name: str,
+#         batch_size: int,
+#         eval_batch_size: int,
+#         max_seq_len: int,
+#         num_segments: int,
+#         p_drop: float,
+#         normalize_tactics: bool,
+#         num_workers: int,
+#         p_only_memory: float = 0.0,
+#         corpus_path: Optional[str] = None,
+#         preds_path: Optional[str] = None,
+#     ) -> None:
+#         super().__init__()
+#         self.data_path = data_path
+#         if corpus_path is not None:
+#             self.corpus = Corpus(corpus_path)
+#         else:
+#             self.corpus = None
+#         self.keep_marks = keep_marks
+#         self.batch_size = batch_size
+#         self.eval_batch_size = eval_batch_size
+#         self.max_seq_len = max_seq_len
+#         self.num_segments = num_segments
+#         self.p_drop = p_drop
+#         self.normalize_tactics = normalize_tactics
+#         self.num_workers = num_workers
+#         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+#         self.p_only_memory = p_only_memory
+
+#         if preds_path is None:
+#             logger.info("Without retrieval data")
+#             self.preds = None
+#         else:
+#             logger.info("With retrieval data")
+#             self.preds = {}
+#             for pred in pickle.load(open(preds_path, "rb")):
+#                 ctx = pred["context"]
+#                 self.preds[ctx.path, ctx.theorem_full_name, ctx.state] = pred
+
+#     def prepare_data(self) -> None:
+#         pass
+
+#     def setup(self, stage: Optional[str] = None) -> None:
+#         if stage in (None, "fit"):
+#             self.ds_train = MultipleSegmentGeneratorDataset(
+#                 os.path.join(self.data_path, "train.json"),
+#                 self.corpus,
+#                 self.keep_marks,
+#                 self.preds,
+#                 self.max_seq_len,
+#                 self.num_segments,
+#                 self.p_drop,
+#                 self.normalize_tactics,
+#                 self.tokenizer,
+#                 is_train=True,
+#                 p_only_memory=self.p_only_memory
+#             )
+
+#         if stage in (None, "fit", "validate"):
+#             self.ds_val = MultipleSegmentGeneratorDataset(
+#                 os.path.join(self.data_path, "val.json"),
+#                 self.corpus,
+#                 self.keep_marks,
+#                 self.preds,
+#                 self.max_seq_len,
+#                 self.num_segments,
+#                 self.p_drop,
+#                 self.normalize_tactics,
+#                 self.tokenizer,
+#                 is_train=False,
+#                 p_only_memory=self.p_only_memory
+#             )
+
+#     def train_dataloader(self) -> DataLoader:
+#         return DataLoader(
+#             self.ds_train,
+#             self.batch_size,
+#             num_workers=self.num_workers,
+#             collate_fn=self.ds_train.collate,
+#             shuffle=True,
+#             pin_memory=True,
+#             drop_last=True,
+#         )
+
+#     def val_dataloader(self) -> DataLoader:
+#         return DataLoader(
+#             self.ds_val,
+#             self.eval_batch_size,
+#             num_workers=self.num_workers,
+#             collate_fn=self.ds_val.collate,
+#             shuffle=False,
+#             pin_memory=True,
+#             drop_last=False,
+#         )

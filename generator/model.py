@@ -21,6 +21,7 @@ from common import (
     get_optimizers,
     load_checkpoint,
     format_augmented_state,
+    _format_augmented_state,
 )
 from retrieval.model import PremiseRetriever
 
@@ -200,9 +201,6 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
 
         loss = self(state_ids, state_mask, tactic_ids)
 
-        print()
-        print("loss_val", loss.detach().cpu().item())
-        print()
         self.log(f"loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
 
@@ -239,40 +237,40 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         self.trainer.save_checkpoint(ckpt_path)
         logger.info(f"Saved checkpoint to {ckpt_path}")
 
-        data_path = self.trainer.datamodule.data_path
-        if self.retriever is None:
-            cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
-        else:
-            self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
-            corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
-            pickle.dump(
-                IndexedCorpus(
-                    self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
-                ),
-                open(corpus_path, "wb"),
-            )
-            cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path} --indexed-corpus-path {corpus_path}"
+        # data_path = self.trainer.datamodule.data_path
+        # if self.retriever is None:
+        #     cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
+        # else:
+        #     self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+        #     corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
+        #     pickle.dump(
+        #         IndexedCorpus(
+        #             self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
+        #         ),
+        #         open(corpus_path, "wb"),
+        #     )
+        #     cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path} --indexed-corpus-path {corpus_path}"
 
-        logger.info(cmd)
+        # logger.info(cmd)
 
-        wait_time = 3600
-        while True:
-            try:
-                _, err = execute(cmd, capture_output=True)
-                break
-            except CalledProcessError as ex:
-                logger.error(ex)
-                logger.error(
-                    f"Failed to evaluate. Retrying in {wait_time / 3600} hour..."
-                )
-                time.sleep(wait_time)
-                wait_time *= 2
+        # wait_time = 3600
+        # while True:
+        #     try:
+        #         _, err = execute(cmd, capture_output=True)
+        #         break
+        #     except CalledProcessError as ex:
+        #         logger.error(ex)
+        #         logger.error(
+        #             f"Failed to evaluate. Retrying in {wait_time / 3600} hour..."
+        #         )
+        #         time.sleep(wait_time)
+        #         wait_time *= 2
 
-        m = re.search(r"Pass@1: (\S+)", err)
-        assert m is not None, err
-        acc = float(m.group(1))
-        self.log("Pass@1_val", acc, on_step=False, on_epoch=True)
-        logger.info(f"Pass@1: {acc}")
+        # m = re.search(r"Pass@1: (\S+)", err)
+        # assert m is not None, err
+        # acc = float(m.group(1))
+        # self.log("Pass@1_val", acc, on_step=False, on_epoch=True)
+        # logger.info(f"Pass@1: {acc}")
 
     ##############
     # Prediction #
@@ -323,6 +321,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         state_mask = tokenized_state.attention_mask.to(self.device)
 
         # Generate tactic candidates using beam search.
+        logger.debug(f"generation, {self.max_seq_len}")
         output = self.generator.generate(
             input_ids=state_ids,
             attention_mask=state_mask,
@@ -357,7 +356,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
 
         return tactics_with_scores
 
-class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
+class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
     def __init__(
         self,
         backbone_model_name: str,
@@ -373,37 +372,21 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         length_penalty: float = 0.0,
         ret_ckpt_path: Optional[str] = None,
         skip_test_proving: bool = True,
-        skip_topk: bool = True,
+        skip_topk: bool = False,
     ) -> None:
-        super().__init__()
-        self.save_hyperparameters()
-        
-        self.lr = lr
-        self.warmup_steps = warmup_steps
-        self.num_beams = num_beams
-        self.length_penalty = length_penalty
-        self.eval_num_retrieved = eval_num_retrieved
-        self.eval_num_cpus = eval_num_cpus
-        self.eval_num_theorems = eval_num_theorems
-        self.max_seq_len = max_seq_len
-        
         self.num_memory_tokens = num_memory_tokens
         self.num_segments = num_segments
-        self.max_nonmemory_seq_len = max_seq_len - 2 * num_memory_tokens
+        self.max_nonmemory_seq_len = max_seq_len - num_memory_tokens
+        
+        super().__init__(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved, 
+                                                          eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
+                                                          length_penalty, ret_ckpt_path)
+
+        self.memory_emb = torch.nn.Embedding(self.num_memory_tokens, self.generator.model_dim)
+        # self.memory_linear = torch.nn.Linear(self.generator.model_dim, self.generator.model_dim, bias=True)
 
         self.skip_test_proving = skip_test_proving
         self.skip_topk = skip_topk
-        
-        self.backbone = RetrievalAugmentedGenerator(backbone_model_name, lr, warmup_steps, num_beams, eval_num_retrieved,
-                                             eval_num_cpus, eval_num_theorems, self.max_nonmemory_seq_len,
-                                             length_penalty, ret_ckpt_path)
-        self.tokenizer = self.backbone.tokenizer
-
-        self.topk_accuracies = dict()
-        for k in range(1, num_beams + 1):
-            acc = TopkAccuracy(k)
-            self.topk_accuracies[k] = acc
-            self.add_module(f"top{k}_acc_val", acc)
 
     @classmethod
     def load(
@@ -414,59 +397,76 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     def _encode_with_memory(
         self,
         state_ids: List[torch.Tensor], # state_ids[seg][idx in batch][token] = emb vector
-        state_mask: List[torch.Tensor]
+        state_mask: List[torch.Tensor],
+        output_attentions: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Takes a list of segments and compute the output of encoder with memory.
         Returns this output and attention mask of the encoder on the last segment.
         """
+        return_dict = dict()
+        
         # Expand embeddings
         state_embeds = []
         num_segments = len(state_ids)
         new_state_mask = []
+        batch_size = state_ids[0].shape[0]
         for segment in range(num_segments):
-            memory_state_shape = (state_ids[segment].shape[0], self.num_memory_tokens, self.backbone.generator.model_dim)
-            memory_mask_shape = (state_ids[segment].shape[0], self.num_memory_tokens)
+            memory_state_shape = (batch_size, self.num_memory_tokens, self.generator.model_dim)
+            memory_mask_shape = (batch_size, self.num_memory_tokens)
             device = state_ids[segment].device
             state_embeds.append(torch.cat((
-                torch.zeros(memory_state_shape, device=device), # read memory
-                self.backbone.generator.shared(state_ids[segment]),
-                torch.zeros(memory_state_shape, device=device), # write memory
+                #torch.zeros(memory_state_shape, device=device), # memory: zeros
+                self.memory_emb.weight.repeat(batch_size, 1, 1),  # memory: trainable embedding
+                self.generator.shared(state_ids[segment]),
             ), dim=-2))
             new_state_mask.append(torch.cat((
-                torch.ones(memory_mask_shape, device=device), # read memory
+                torch.ones(memory_mask_shape, device=device), # memory
                 state_mask[segment],
-                torch.ones(memory_mask_shape, device=device), # write memory
             ), dim=-1))
 
         # Compute memory
+        attentions = []
         for segment in range(num_segments):
-            enc_out = self.backbone.generator.encoder(
+            enc_out = self.generator.encoder(
                 inputs_embeds=state_embeds[segment],
                 attention_mask=new_state_mask[segment],
+                output_attentions=output_attentions,
             )
             if segment < num_segments - 1:
-                # print(torch.norm(enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]))
-                # print(torch.norm(enc_out['last_hidden_state'][:, -2*self.num_memory_tokens:-self.num_memory_tokens, :]))
-                state_embeds[segment + 1][:, :self.num_memory_tokens, :] = enc_out['last_hidden_state'][:, -self.num_memory_tokens:, :]
+                state_embeds[segment + 1][:, :self.num_memory_tokens, :] = enc_out['last_hidden_state'][:, :self.num_memory_tokens, :]
+            if output_attentions:
+                attentions.append(enc_out.attentions)
 
-        return enc_out, new_state_mask[-1]
+        return_dict['encoder_output'] = enc_out
+        return_dict['encoder_mask'] = new_state_mask[-1]
+        if output_attentions:
+            return_dict['attentions'] = attentions
+
+        return return_dict
     
     def forward(
         self,
         state_ids: List[torch.Tensor], # state_ids[seg][idx in batch][token] = emb vector
         state_mask: List[torch.Tensor],
         tactic_ids: torch.Tensor,
+        output_attentions: bool = False,
     ) -> torch.Tensor:
-        enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+        enc_dict = self._encode_with_memory(state_ids, state_mask, output_attentions=output_attentions)
+        enc_out = enc_dict['encoder_output']
+        last_enc_mask = enc_dict['encoder_mask']
         #decoder_input_ids = tactic_ids
         #decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
-        return self.backbone.generator(
+        out = self.generator(
             #input_ids=decoder_input_ids,
             labels=tactic_ids,
             encoder_outputs=enc_out,
             attention_mask=last_enc_mask,
-        ).loss
+            output_attentions=output_attentions,
+        )
+        if output_attentions:
+            out.encoder_attentions = enc_dict['attentions']
+        return out
 
     ############
     # Training #
@@ -477,7 +477,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
             batch["state_ids"],
             batch["state_mask"],
             batch["tactic_ids"],
-        )
+        ).loss
         self.log(
             "loss_train",
             loss,
@@ -511,11 +511,6 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         # tb.add_text(f"{split}_state", f"```\n{inp}\n```", self.global_step)
         # tb.add_text(f"{split}_tactic", f"`{oup}`", self.global_step)
 
-    def configure_optimizers(self) -> Dict[str, Any]:
-        return get_optimizers(
-            self.parameters(), self.trainer, self.lr, self.warmup_steps
-        )
-
     ##############
     # Validation #
     ##############
@@ -525,14 +520,16 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         state_mask = batch["state_mask"]
         tactic_ids = batch["tactic_ids"]
 
-        loss = self(state_ids, state_mask, tactic_ids)
+        loss = self(state_ids, state_mask, tactic_ids).loss
         self.log("loss_val", loss, on_step=False, on_epoch=True, sync_dist=True)
         self._log_io_texts("val", state_ids, tactic_ids)
 
         # Generate topk tactic candidates via Beam Search.
         if not self.skip_topk:
-            enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
-            output = self.backbone.generator.generate(
+            enc_dict = self._encode_with_memory(state_ids, state_mask)
+            enc_out = enc_dict['encoder_output']
+            last_enc_mask = enc_dict['encoder_mask']
+            output = self.generator.generate(
                 encoder_outputs=enc_out,
                 attention_mask=last_enc_mask,
                 max_length=self.max_seq_len,
@@ -549,31 +546,31 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
                 for i in range(batch_size)
             ]
 
-        # tb = self.logger.experiment
-        # msg = "\n".join(tactics_pred[0])
-        # tb.log({"preds_val": msg}\n```", self.global_step)
-
-        # # Log the topk accuracies.
-        # for k in range(1, self.num_beams + 1):
-        #     topk_acc = self.topk_accuracies[k]
-        #     topk_acc(tactics_pred, batch["tactic"])
-        #     self.log(f"top{k}_acc_val", topk_acc, on_step=False, on_epoch=True)
+            # tb = self.logger.experiment
+            # msg = "\n".join(tactics_pred[0])
+            # tb.log({"preds_val": msg}, self.global_step)
+    
+            # Log the topk accuracies.
+            for k in range(1, self.num_beams + 1):
+                topk_acc = self.topk_accuracies[k]
+                topk_acc(tactics_pred, batch["tactic"])
+                self.log(f"top{k}_acc_val", topk_acc, on_step=False, on_epoch=True)
 
     def on_validation_epoch_end(self) -> None:
-        ckpt_path = f"{self.trainer.log_dir}/checkpoints/last.ckpt"
-        self.trainer.save_checkpoint(ckpt_path)
-        logger.info(f"Saved checkpoint to {ckpt_path}")
+        # ckpt_path = f"{self.trainer.log_dir}/checkpoints/last.ckpt"
+        # self.trainer.save_checkpoint(ckpt_path)
+        # logger.info(f"Saved checkpoint to {ckpt_path}")
 
         if not self.skip_test_proving:
             data_path = self.trainer.datamodule.data_path
-            if self.backbone.retriever is None:
+            if self.retriever is None:
                 cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
             else:
-                self.backbone.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+                self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
                 corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
                 pickle.dump(
                     IndexedCorpus(
-                        self.backbone.retriever.corpus, self.backbone.retriever.corpus_embeddings.cpu()
+                        self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
                     ),
                     open(corpus_path, "wb"),
                 )
@@ -625,7 +622,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         num_samples: int,
     ) -> List[List[Tuple[str, float]]]:
         logger.debug(state)
-        assert self.backbone.retriever is not None
+        assert self.retriever is not None, "RMT is meaningless without retrieval"
         retrieved_premises, _ = self.retriever.retrieve(
             state,
             file_path,
@@ -640,7 +637,7 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
                 new_segment, new_used_premises = _format_augmented_state(
                     s,
                     premises[:used_premises],
-                    self.max_seq_len,
+                    self.max_nonmemory_seq_len,
                     p_drop=0.0,
                 )
                 segments[i].append(new_segment)
@@ -661,10 +658,13 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         state_ids = [t.input_ids.to(self.device) for t in tokenized_state]
         state_mask = [t.attention_mask.to(self.device) for t in tokenized_state]
 
-        enc_out, last_enc_mask = self._encode_with_memory(state_ids, state_mask)
+        enc_dict = self._encode_with_memory(state_ids, state_mask)
+        enc_out = enc_dict['encoder_output']
+        last_enc_mask = enc_dict['encoder_mask']
 
         # Generate tactic candidates using beam search.
-        output = self.backbone.generator.generate(
+        print(f"generation, {self.max_seq_len}")
+        output = self.generator.generate(
             encoder_outputs=enc_out,
             attention_mask=last_enc_mask,
             max_length=self.max_seq_len,
@@ -697,6 +697,9 @@ class RMTRetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
             tactics_with_scores.append(list(zip_strict(output_text, output_score)))
 
         return tactics_with_scores
+
+# class TwoHeadRMTRetrievalAugmentedGenerator(RMTRetrievalAugmentedGenerator):
+    
 
 class GPT4TacticGenerator(TacticGenerator):
     def __init__(

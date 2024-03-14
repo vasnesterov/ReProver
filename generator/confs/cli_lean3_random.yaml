@@ -10,9 +10,9 @@ trainer:
       offload_optimizer: false
       cpu_checkpointing: false
   gradient_clip_val: 1.0
-  max_steps: 500000
-  val_check_interval: 100
-  check_val_every_n_epoch: 2
+  max_steps: 77856 #500000
+  val_check_interval: 4000
+  # check_val_every_n_epoch: 2
   num_sanity_val_steps: 0
   callbacks:
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
@@ -21,16 +21,22 @@ trainer:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         verbose: true
-        save_top_k: 1
+        every_n_epochs: 1
+        save_top_k: -1
         save_last: true
-        monitor: Pass@1_val
-        mode: max
-    - class_path: pytorch_lightning.callbacks.EarlyStopping
-      init_args:
-        monitor: Pass@1_val
-        patience: 3
-        mode: max
-        verbose: true
+    # - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+    #   init_args:
+    #     verbose: true
+    #     save_top_k: 1
+    #     save_last: true
+    #     monitor: Pass@1_val
+    #     mode: max
+    # - class_path: pytorch_lightning.callbacks.EarlyStopping
+    #   init_args:
+    #     monitor: Pass@1_val
+    #     patience: 3
+    #     mode: max
+    #     verbose: true
   log_every_n_steps: 10
 
 model:
@@ -49,9 +55,9 @@ data:
   corpus_path: data/leandojo_benchmark/corpus.jsonl
   keep_marks: true
   preds_path: pred_random.pickle
-  batch_size: 8  # effective_batch_size == batch_size * accumulate_grad_batches * devices
+  batch_size: 16  # effective_batch_size == batch_size * accumulate_grad_batches * devices
   eval_batch_size: 64
-  max_seq_len: 2300
+  max_seq_len: 500 # 2300
   p_drop: 0.5
   normalize_tactics: true
-  num_workers: 8
+  num_workers: 16

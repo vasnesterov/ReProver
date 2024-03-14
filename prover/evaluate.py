@@ -12,7 +12,8 @@ from typing import List, Tuple, Optional
 from lean_dojo import LeanGitRepo, Theorem, Pos, is_available_in_cache
 
 from common import set_logger
-from prover.proof_search import Status, DistributedProver
+# from prover.proof_search import Status, DistributedProver
+from prover.proof_search_fast import Status, DistributedProver
 
 
 def _get_theorems(args) -> Tuple[LeanGitRepo, List[Theorem], List[Pos]]:
@@ -97,6 +98,7 @@ def main() -> None:
     parser.add_argument("--full-name", type=str)
     parser.add_argument("--name-filter", type=str)
     parser.add_argument("--num-theorems", type=int)
+    parser.add_argument("--use-rmt", action="store_true")
     parser.add_argument(
         "--ckpt_path",
         type=str,
@@ -128,6 +130,10 @@ def main() -> None:
         "--with-gpus", action="store_true", help="Use GPUs for proof search."
     )
     parser.add_argument(
+        "--shared-gpu", action="store_true", help="Use GPUs for proof search."
+    )
+    
+    parser.add_argument(
         "--verbose", action="store_true", help="Set the logging level to DEBUG."
     )
     args = parser.parse_args()
@@ -155,6 +161,8 @@ def main() -> None:
         timeout=args.timeout,
         num_sampled_tactics=args.num_sampled_tactics,
         debug=args.verbose,
+        use_RMT=args.use_rmt,
+        shared_gpu=args.shared_gpu
     )
     results = prover.search_unordered(repo, theorems, positions)
 
