@@ -1,4 +1,5 @@
 """Data module for the tactic generator."""
+
 import os
 import json
 import pickle
@@ -29,7 +30,8 @@ class GeneratorDataset(Dataset):
         corpus: Corpus,
         keep_marks: bool,
         preds: List[Dict[str, Any]],
-        max_seq_len: int,
+        max_inp_seq_len: int,
+        max_oup_seq_len: int,
         p_drop: float,
         normalize_tactics: bool,
         tokenizer: ByT5Tokenizer,
@@ -40,7 +42,8 @@ class GeneratorDataset(Dataset):
         self.corpus = corpus
         self.keep_marks = keep_marks
         self.preds = preds
-        self.max_seq_len = max_seq_len
+        self.max_inp_seq_len = max_inp_seq_len
+        self.max_oup_seq_len = max_oup_seq_len
         self.p_drop = p_drop
         self.tokenizer = tokenizer
         self.is_train = is_train
@@ -88,7 +91,7 @@ class GeneratorDataset(Dataset):
             ex["state"] = format_augmented_state(
                 ex["state"],
                 pred["retrieved_premises"],
-                self.max_seq_len,
+                self.max_inp_seq_len,
                 self.p_drop if self.is_train else 0.0,
             )
 
@@ -102,7 +105,7 @@ class GeneratorDataset(Dataset):
         tokenized_state = self.tokenizer(
             state,
             padding="longest",
-            max_length=self.max_seq_len,
+            max_length=self.max_inp_seq_len,
             truncation=True,
             return_tensors="pt",
         )
@@ -110,7 +113,7 @@ class GeneratorDataset(Dataset):
         tokenized_tactic = self.tokenizer(
             tactic,
             padding="longest",
-            max_length=self.max_seq_len,
+            max_length=self.max_oup_seq_len,
             truncation=True,
             return_tensors="pt",
         )
@@ -141,7 +144,8 @@ class GeneratorDataModule(pl.LightningDataModule):
         model_name: str,
         batch_size: int,
         eval_batch_size: int,
-        max_seq_len: int,
+        max_inp_seq_len: int,
+        max_oup_seq_len: int,
         p_drop: float,
         normalize_tactics: bool,
         num_workers: int,
@@ -157,7 +161,8 @@ class GeneratorDataModule(pl.LightningDataModule):
         self.keep_marks = keep_marks
         self.batch_size = batch_size
         self.eval_batch_size = eval_batch_size
-        self.max_seq_len = max_seq_len
+        self.max_inp_seq_len = max_inp_seq_len
+        self.max_oup_seq_len = max_oup_seq_len
         self.p_drop = p_drop
         self.normalize_tactics = normalize_tactics
         self.num_workers = num_workers
@@ -183,7 +188,8 @@ class GeneratorDataModule(pl.LightningDataModule):
                 self.corpus,
                 self.keep_marks,
                 self.preds,
-                self.max_seq_len,
+                self.max_inp_seq_len,
+                self.max_oup_seq_len,
                 self.p_drop,
                 self.normalize_tactics,
                 self.tokenizer,
@@ -196,7 +202,8 @@ class GeneratorDataModule(pl.LightningDataModule):
                 self.corpus,
                 self.keep_marks,
                 self.preds,
-                self.max_seq_len,
+                self.max_inp_seq_len,
+                self.max_oup_seq_len,
                 self.p_drop,
                 self.normalize_tactics,
                 self.tokenizer,

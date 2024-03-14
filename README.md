@@ -18,6 +18,8 @@ NeurIPS (Datasets and Benchmarks Track), 2023, Oral presentation
 }
 ```
 
+Lean 3 is deprecated. The `main` branch only supports Lean 4. You may use the [`legacy`](https://github.com/lean-dojo/ReProver/tree/legacy) branch if you want to work with Lean 3.
+
 [![GitHub license](https://img.shields.io/github/license/MineDojo/MineDojo)](https://github.com/MineDojo/MineDojo/blob/main/LICENSE) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 
@@ -41,6 +43,7 @@ NeurIPS (Datasets and Benchmarks Track), 2023, Oral presentation
 | [kaiyuy/leandojo-lean3-retriever-tacgen-byt5-small](https://huggingface.co/kaiyuy/leandojo-lean3-retriever-tacgen-byt5-small) | ByT5 (encoder-decoder) | LeanDojo Benchmark (Lean 3) | Retrieved premises + proof state | Tactic |
 | [kaiyuy/leandojo-lean4-tacgen-byt5-small](https://huggingface.co/kaiyuy/leandojo-lean4-tacgen-byt5-small) | ByT5 (encoder-decoder)  | LeanDojo Benchmark 4 (Lean 4) | Proof state | Tactic |
 | [kaiyuy/leandojo-lean4-retriever-byt5-small](https://huggingface.co/kaiyuy/leandojo-lean4-retriever-byt5-small) | ByT5 (encoder-only) | LeanDojo Benchmark (Lean 4) | Proof state | Embedding |
+| [kaiyuy/leandojo-lean4-retriever-tacgen-byt5-small](https://huggingface.co/kaiyuy/leandojo-lean4-retriever-tacgen-byt5-small) | ByT5 (encoder-decoder) | LeanDojo Benchmark (Lean 4) | Retrieved premises + proof state | Tactic |
 
 Our trained models are available on HuggingFace Hub. With minimum dependencies (only [PyTorch](https://pytorch.org/) and [HuggingFace Transformers](https://huggingface.co/docs/transformers/index)), you can use our models to perform inference, finetune them on your own data, or plug them into your customized theorem proving pipeline. Below are some examples.
 
@@ -81,12 +84,12 @@ for tac in tactic_candidates:
 
 The expected output is shown below. `<a>` and `</a>` are markers of premises in generated tactics. You should remove them when using the tactics.
 ```
-rw [<a>nat.gcd</a>, <a>nat.gcd_self_right</a>]
+cases n
 
+cases n
 simp [<a>nat.gcd</a>]
-unfold gcd
-rw [<a>nat.gcd_comm</a>]
-rw [<a>nat.gcd</a>, <a>nat.gcd_self_right</a>]
+rw <a>nat.gcd_comm</a>
+by_cases hn : n = 0
 ```
 
 
@@ -97,10 +100,10 @@ use the vectors to perform retrieval by maximizing cosine similarity.
 ```python
 import torch
 from typing import Union, List
-from transformers import AutoTokenizer, T5EncoderModel
+from transformers import AutoTokenizer, AutoModelForTextEncoding
 
 tokenizer = AutoTokenizer.from_pretrained("kaiyuy/leandojo-lean3-retriever-byt5-small")
-model = T5EncoderModel.from_pretrained("kaiyuy/leandojo-lean3-retriever-byt5-small")
+model = AutoModelForTextEncoding.from_pretrained("kaiyuy/leandojo-lean3-retriever-byt5-small")
 
 state = "n : ℕ\n⊢ gcd n n = n"
 premises = [
@@ -139,7 +142,7 @@ def retrieve(state: str, premises: List[str], k: int) -> List[str]:
     topk = scores.topk(k).indices.tolist()
     return [premises[i] for i in topk]
 
-for p in retrieve(state, premises, k=3):
+for p in retrieve(state, premises, k=4):
     print(p, end="\n\n")
 ```
 
@@ -151,6 +154,8 @@ def <a>nat.gcd</a> : nat → nat → nat
                 gcd (y % succ x) (succ x)
 
 @[simp] theorem <a>nat.gcd_zero_left</a> (x : nat) : gcd 0 x = x
+
+@[simp] theorem <a>nat.gcd_succ</a> (x y : nat) : gcd (succ x) y = gcd (y % succ x) (succ x)
 
 @[simp] theorem <a>nat.mod_self</a> (n : nat) : n % n = 0
 ```
@@ -224,7 +229,7 @@ induction n with n IH
 
 ## Using the Model Directly in Lean
 
-Check out [LeanInfer](https://github.com/lean-dojo/LeanInfer) if you want to run ReProver's tactic generator directly in Lean's VSCode workflow. 
+Check out [Lean Copilot](https://github.com/lean-dojo/LeanCopilot) if you want to run ReProver's tactic generator directly in Lean's VSCode workflow. 
 
 
 ## Requirements
@@ -234,12 +239,13 @@ Check out [LeanInfer](https://github.com/lean-dojo/LeanInfer) if you want to run
 ```bash
 conda create --yes --name ReProver python=3.10 ipython numpy
 conda activate ReProver
-conda install --yes -c pytorch -c nvidia pytorch pytorch-cuda=11.7  # Use your own CUDA version.
-pip install tqdm loguru deepspeed pytorch-lightning[extra] transformers tensorboard openai rank_bm25 lean-dojo
+pip install torch --index-url https://download.pytorch.org/whl/cu121  # Depending on your CUDA version; see https://pytorch.org/.
+pip install tqdm loguru deepspeed "pytorch-lightning[extra]" transformers tensorboard openai rank_bm25 lean-dojo
 ```
 3. Prepend the repo's root to the `PYTHONPATH` environment variable.
-4. Make sure `wget` and `tar` are available. Then, run `python scripts/download_data.py` to download [LeanDojo Benchmark](https://zenodo.org/record/8242196) and [LeanDojo Benchmark 4](https://zenodo.org/record/8242200). They will be saved to `./data`. 
-5. Use [LeanDojo](https://github.com/lean-dojo/LeanDojo) to trace all repos in the datasets: `python scripts/trace_repos.py`. This step may take some time. Please refer to [LeanDojo's documentation](https://leandojo.readthedocs.io/en/latest/) if you encounter any issues.
+4. Make sure `wget` and `tar` are available. Then, run `python scripts/download_data.py` to download [LeanDojo Benchmark](https://zenodo.org/doi/10.5281/zenodo.8016385) and [LeanDojo Benchmark 4](https://zenodo.org/doi/10.5281/zenodo.8040109). They will be saved to `./data`.
+5. Satisfy the requirements of [LeanDojo](https://github.com/lean-dojo/LeanDojo#requirements).
+6. Use [LeanDojo](https://github.com/lean-dojo/LeanDojo) to trace all repos in the datasets: `python scripts/trace_repos.py`. This step may take some time. Please refer to [LeanDojo's documentation](https://leandojo.readthedocs.io/en/latest/) if you encounter any issues.
 
 
 ## Premise Selection
@@ -293,9 +299,9 @@ Similar to premise selection, you can run `python generator/main.py --help` and 
 
 To train tactic generators without retrieval:
 ```bash
-python generator/main.py fit --config generator/confs/cli_lean3_random.yaml           # LeanDojo Benchmark, `random` split
-python generator/main.py fit --config generator/confs/cli_lean3_novel_premises.yaml   # LeanDojo Benchmark, `novel_premises` split
-python generator/main.py fit --config generator/confs/cli_lean4_random.yaml     # LeanDojo Benchmark 4, `random` split
+python generator/main.py fit --config generator/confs/cli_lean3_random.yaml             # LeanDojo Benchmark, `random` split
+python generator/main.py fit --config generator/confs/cli_lean3_novel_premises.yaml     # LeanDojo Benchmark, `novel_premises` split
+python generator/main.py fit --config generator/confs/cli_lean4_random.yaml             # LeanDojo Benchmark 4, `random` split
 python generator/main.py fit --config generator/confs/cli_lean4_novel_premises.yaml     # LeanDojo Benchmark 4, `novel_premises` split
 ```
 
@@ -313,22 +319,24 @@ After the tactic generator is trained, we combine it with best-first search to p
 
 For models without retrieval, run:
 ```bash
-python prover/evaluate.py --data-path data/leandojo_benchmark/random/  --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
-python prover/evaluate.py --data-path data/leandojo_benchmark/novel_premises/  --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
-python prover/evaluate.py --data-path data/leandojo_benchmark_4/random/  --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
-python prover/evaluate.py --data-path data/leandojo_benchmark_4/novel_premises/  --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
+python prover/evaluate.py --data-path data/leandojo_benchmark/random/ --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
+python prover/evaluate.py --data-path data/leandojo_benchmark/novel_premises/ --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
+python prover/evaluate.py --data-path data/leandojo_benchmark_4/random/ --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
+python prover/evaluate.py --data-path data/leandojo_benchmark_4/novel_premises/ --ckpt_path PATH_TO_MODEL_CHECKPOINT --split test --num-cpus 8 --with-gpus
 ```
 
 For models with retrieval, first use the retriever to index the corpus (pre-computing the embeddings of all premises):
 ```bash
 python retrieval/index.py --ckpt_path PATH_TO_RETRIEVER_CHECKPOINT --corpus-path data/leandojo_benchmark/corpus.jsonl --output-path PATH_TO_INDEXED_CORPUS
+python retrieval/index.py --ckpt_path PATH_TO_RETRIEVER_CHECKPOINT --corpus-path data/leandojo_benchmark_4/corpus.jsonl --output-path PATH_TO_INDEXED_CORPUS
 # Do it separately for two data splits.
 ```
 
 Then, run:
 ```bash
 python prover/evaluate.py --data-path data/leandojo_benchmark/random/  --ckpt_path PATH_TO_REPROVER_CHECKPOINT --indexed-corpus-path PATH_TO_INDEXED_CORPUS --split test --num-cpus 8 --with-gpus
-python prover/evaluate.py --data-path data/leandojo_benchmark/novel_premises/  --ckpt_path PATH_TO_REPROVER_CHECKPOINT --indexed-corpus-path PATH_TO_INDEXED_CORPUS --split test --num-cpus 8 --with-gpus
+python prover/evaluate.py --data-path data/leandojo_benchmark_4/random/  --ckpt_path PATH_TO_REPROVER_CHECKPOINT --indexed-corpus-path PATH_TO_INDEXED_CORPUS --split test --num-cpus 8 --with-gpus
+# Do it separately two data splits.
 ```
 
 See [here](docs/eval_MiniF2F_ProofNet.md) if you want to evaluate on other Lean repos such as [miniF2F](https://github.com/facebookresearch/miniF2F) and [ProofNet](https://github.com/zhangir-azerbayev/ProofNet).
