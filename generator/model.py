@@ -1,16 +1,15 @@
 """Lightning module for the tactic generator."""
+
 import re
 import time
 import torch
-#  import openai
+import openai
 import pickle
 from lean_dojo import Pos
 from loguru import logger
 import pytorch_lightning as pl
 from torchmetrics import Metric
-from lean_dojo.utils import execute
 from abc import ABC, abstractmethod
-from subprocess import CalledProcessError
 from typing import List, Dict, Any, Optional, Tuple
 from transformers import T5ForConditionalGeneration, AutoTokenizer
 
@@ -89,7 +88,8 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         eval_num_retrieved: int,
         eval_num_cpus: int,
         eval_num_theorems: int,
-        max_seq_len: int,
+        max_inp_seq_len: int,
+        max_oup_seq_len: int,
         length_penalty: float = 0.0,
         ret_ckpt_path: Optional[str] = None,
     ) -> None:
@@ -102,7 +102,8 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         self.eval_num_retrieved = eval_num_retrieved
         self.eval_num_cpus = eval_num_cpus
         self.eval_num_theorems = eval_num_theorems
-        self.max_seq_len = max_seq_len
+        self.max_inp_seq_len = max_inp_seq_len
+        self.max_oup_seq_len = max_oup_seq_len
 
         if ret_ckpt_path is None:
             logger.info("Without retrieval")
@@ -194,7 +195,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
     # Validation #
     ##############
 
-    def validation_step(self, batch: Dict[str, Any], _) -> None:        
+    def validation_step(self, batch: Dict[str, Any], _) -> None:
         state_ids = batch["state_ids"]
         state_mask = batch["state_mask"]
         tactic_ids = batch["tactic_ids"]
@@ -208,7 +209,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         output = self.generator.generate(
             input_ids=state_ids,
             attention_mask=state_mask,
-            max_length=self.max_seq_len,
+            max_length=self.max_oup_seq_len,
             num_beams=self.num_beams,
             do_sample=False,
             num_return_sequences=self.num_beams,
@@ -233,44 +234,40 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
             self.log(f"top{k}_acc_val", topk_acc, on_step=False, on_epoch=True)
 
     def on_validation_epoch_end(self) -> None:
+        if self.eval_num_theorems == 0:
+            return
+        from prover.evaluate import evaluate  # Avoid circular import.
         ckpt_path = f"{self.trainer.log_dir}/checkpoints/last.ckpt"
         self.trainer.save_checkpoint(ckpt_path)
-        logger.info(f"Saved checkpoint to {ckpt_path}")
-
-        # data_path = self.trainer.datamodule.data_path
-        # if self.retriever is None:
-        #     cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
-        # else:
-        #     self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
-        #     corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
-        #     pickle.dump(
-        #         IndexedCorpus(
-        #             self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
-        #         ),
-        #         open(corpus_path, "wb"),
-        #     )
-        #     cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path} --indexed-corpus-path {corpus_path}"
-
-        # logger.info(cmd)
-
-        # wait_time = 3600
-        # while True:
-        #     try:
-        #         _, err = execute(cmd, capture_output=True)
-        #         break
-        #     except CalledProcessError as ex:
-        #         logger.error(ex)
-        #         logger.error(
-        #             f"Failed to evaluate. Retrying in {wait_time / 3600} hour..."
-        #         )
-        #         time.sleep(wait_time)
-        #         wait_time *= 2
-
-        # m = re.search(r"Pass@1: (\S+)", err)
-        # assert m is not None, err
-        # acc = float(m.group(1))
-        # self.log("Pass@1_val", acc, on_step=False, on_epoch=True)
-        # logger.info(f"Pass@1: {acc}")
+        logger.info(f"Saved checkpoint to {ckpt_path}. Evaluating...")
+        
+        data_path = self.trainer.datamodule.data_path
+        if self.retriever is None:
+            acc = evaluate(
+                data_path=data_path,
+                num_cpus=self.eval_num_cpus,
+                num_theorems=self.eval_num_theorems,
+                ckpt_path=ckpt_path,
+            )
+        else:
+            self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+            corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
+            pickle.dump(
+                IndexedCorpus(
+                    self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
+                ),
+                open(corpus_path, "wb"),
+            )
+            acc = evaluate(
+                data_path=data_path,
+                num_cpus=self.eval_num_cpus,
+                num_theorems=self.eval_num_theorems,
+                ckpt_path=ckpt_path,
+                indexed_corpus_path=corpus_path,
+            )
+            
+            self.log("Pass@1_val", acc, on_step=False, on_epoch=True, sync_dist=True)
+            logger.info(f"Pass@1: {acc}")
 
     ##############
     # Prediction #
@@ -306,14 +303,14 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
                 self.eval_num_retrieved,
             )
             state = [
-                format_augmented_state(s, premises, self.max_seq_len, p_drop=0.0)
+                format_augmented_state(s, premises, self.max_inp_seq_len, p_drop=0.0)
                 for s, premises in zip_strict(state, retrieved_premises)
             ]
 
         tokenized_state = self.tokenizer(
             state,
             padding="longest",
-            max_length=self.max_seq_len,
+            max_length=self.max_inp_seq_len,
             truncation=True,
             return_tensors="pt",
         )
@@ -321,11 +318,10 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
         state_mask = tokenized_state.attention_mask.to(self.device)
 
         # Generate tactic candidates using beam search.
-        logger.debug(f"generation, {self.max_seq_len}")
         output = self.generator.generate(
             input_ids=state_ids,
             attention_mask=state_mask,
-            max_length=self.max_seq_len,
+            max_length=self.max_oup_seq_len,
             num_beams=num_samples,
             length_penalty=self.length_penalty,
             do_sample=False,
@@ -354,7 +350,7 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
 
             tactics_with_scores.append(list(zip_strict(output_text, output_score)))
 
-        return tactics_with_scores
+        return tactics_with_score
 
 class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
     def __init__(
@@ -559,21 +555,28 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
     def on_validation_epoch_end(self) -> None:
         # ckpt_path = f"{self.trainer.log_dir}/checkpoints/last.ckpt"
         # self.trainer.save_checkpoint(ckpt_path)
+        data_path = self.trainer.datamodule.data_path
+        if self.retriever is None:
         # logger.info(f"Saved checkpoint to {ckpt_path}")
 
         if not self.skip_test_proving:
             data_path = self.trainer.datamodule.data_path
             if self.retriever is None:
                 cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path}"
-            else:
-                self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
-                corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
-                pickle.dump(
-                    IndexedCorpus(
-                        self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
-                    ),
-                    open(corpus_path, "wb"),
-                )
+                data_path=data_path,
+                num_cpus=self.eval_num_cpus,
+                num_theorems=self.eval_num_theorems,
+                ckpt_path=ckpt_path,
+            )
+        else:
+            self.retriever.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+            corpus_path = f"{self.trainer.log_dir}/checkpoints/indexed_corpus.pickle"
+            pickle.dump(
+                IndexedCorpus(
+                    self.retriever.corpus, self.retriever.corpus_embeddings.cpu()
+                ),
+                open(corpus_path, "wb"),
+            )
                 cmd = f"python prover/evaluate.py --data-path {data_path} --num-cpus {self.eval_num_cpus} --num-theorems {self.eval_num_theorems} --ckpt_path {ckpt_path} --indexed-corpus-path {corpus_path}"
     
             logger.info(cmd)
@@ -590,12 +593,12 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
                     )
                     time.sleep(wait_time)
                     wait_time *= 2
-    
+
             m = re.search(r"Pass@1: (\S+)", err)
             assert m is not None, err
             acc = float(m.group(1))
             self.log("Pass@1_val", acc, on_step=False, on_epoch=True)
-            logger.info(f"Pass@1: {acc}")
+        logger.info(f"Pass@1: {acc}")
 
     ##############
     # Prediction #
@@ -622,16 +625,18 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         num_samples: int,
     ) -> List[List[Tuple[str, float]]]:
         logger.debug(state)
-        assert self.retriever is not None, "RMT is meaningless without retrieval"
-        retrieved_premises, _ = self.retriever.retrieve(
-            state,
-            file_path,
-            theorem_full_name,
-            theorem_pos,
-            self.eval_num_retrieved,
-        )
-        segments = [[] for i in range(self.num_segments)]
+        if self.retriever is not None:
+            retrieved_premises, _ = self.retriever.retrieve(
+                state,
+                file_path,
+                theorem_full_name,
+                theorem_pos,
+                self.eval_num_retrieved,
+            )
+            state = [
         for s, premises in zip_strict(state, retrieved_premises):
+                for s, premises in zip_strict(state, retrieved_premises)
+            ]
             used_premises = 0
             for i in range(self.num_segments):
                 new_segment, new_used_premises = _format_augmented_state(
@@ -645,11 +650,19 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
 
         segments.reverse() # best premises go in the end
 
+        tokenized_state = self.tokenizer(
+            state,
+            padding="longest",
         tokenized_state = [
             self.tokenizer(
                 segments[i],
                 padding="longest",
                 max_length=self.max_seq_len,
+            truncation=True,
+            return_tensors="pt",
+        )
+        state_ids = tokenized_state.input_ids.to(self.device)
+        state_mask = tokenized_state.attention_mask.to(self.device)
                 truncation=True,
                 return_tensors="pt",
             )
@@ -665,9 +678,9 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
         # Generate tactic candidates using beam search.
         print(f"generation, {self.max_seq_len}")
         output = self.generator.generate(
-            encoder_outputs=enc_out,
-            attention_mask=last_enc_mask,
-            max_length=self.max_seq_len,
+            input_ids=state_ids,
+            attention_mask=state_mask,
+            max_length=self.max_oup_seq_len,
             num_beams=num_samples,
             length_penalty=self.length_penalty,
             do_sample=False,
@@ -698,8 +711,6 @@ class RMTRetrievalAugmentedGenerator(RetrievalAugmentedGenerator):
 
         return tactics_with_scores
 
-# class TwoHeadRMTRetrievalAugmentedGenerator(RMTRetrievalAugmentedGenerator):
-    
 
 class GPT4TacticGenerator(TacticGenerator):
     def __init__(

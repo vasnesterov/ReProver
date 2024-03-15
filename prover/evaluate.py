@@ -1,5 +1,6 @@
 """Script for evaluating the prover on theorems extracted by LeanDojo.
 """
+
 import os
 import uuid
 import json
@@ -12,18 +13,27 @@ from typing import List, Tuple, Optional
 from lean_dojo import LeanGitRepo, Theorem, Pos, is_available_in_cache
 
 from common import set_logger
+
 # from prover.proof_search import Status, DistributedProver
 from prover.proof_search_fast import Status, DistributedProver
-
+# from prover.trace import Status, DistributedProver
 
 def _get_theorems(args) -> Tuple[LeanGitRepo, List[Theorem], List[Pos]]:
+def _get_theorems(
+    data_path: str,
+    split: str,
+    file_path: str,
+    full_name: str,
+    name_filter: str,
+    num_theorems: int,
+) -> Tuple[LeanGitRepo, List[Theorem], List[Pos]]:
     repo, theorems, positions = _get_theorems_from_files(
-        args.data_path,
-        args.split,
-        args.file_path,
-        args.full_name,
-        args.name_filter,
-        args.num_theorems,
+        data_path,
+        split,
+        file_path,
+        full_name,
+        name_filter,
+        num_theorems,
     )
 
     all_repos = {thm.repo for thm in theorems}
@@ -75,6 +85,138 @@ def _get_theorems_from_files(
 
     return repo, theorems, positions
 
+# TODO: make args as in original
+def _get_theorems_with_tactics(args) -> Tuple[LeanGitRepo, List[Theorem], List[Pos], List[str]]:
+    repo, theorems, positions, tactics = _get_theorems_tactics_from_files(
+        args.data_path,
+        args.split,
+        args.file_path,
+        args.full_name,
+        args.name_filter,
+        args.num_theorems,
+    )
+
+    all_repos = {thm.repo for thm in theorems}
+    for r in all_repos:
+        assert is_available_in_cache(
+            r
+        ), f"{r} has not been traced yet. Please use LeanDojo to trace it so that it's available in the cache."
+
+    return repo, theorems, positions, tactics
+
+def _get_theorems_tactics_from_files(
+    data_path: str,
+    split: str,
+    file_path: Optional[str],
+    full_name: Optional[str],
+    name_filter: Optional[str],
+    num_theorems: Optional[int],
+) -> Tuple[LeanGitRepo, List[Theorem], List[Pos], List[List[str]]]:
+    data = json.load(open(os.path.join(data_path, f"{split}.json")))
+    theorems = []
+    positions = []
+    tactics = []
+
+    for t in data:
+        if file_path is not None and t["file_path"] != file_path:
+            continue
+        if full_name is not None and t["full_name"] != full_name:
+            continue
+        if name_filter is not None and not hashlib.md5(
+            t["full_name"].encode()
+        ).hexdigest().startswith(name_filter):
+            continue
+        
+        repo = LeanGitRepo(t["url"], t["commit"])
+        theorems.append(Theorem(repo, t["file_path"], t["full_name"]))
+        positions.append(Pos(*t["start"]))
+        tactics.append([tac['tactic'] for tac in t['traced_tactics']])
+    # theorems = sorted(
+    #     theorems,
+    #     key=lambda t: hashlib.md5(
+    #         (str(t.file_path) + ":" + t.full_name).encode()
+    #     ).hexdigest(),
+    # )
+    if num_theorems is not None:
+        theorems = theorems[:num_theorems]
+        positions = positions[:num_theorems]
+        tactics = tactics[:num_theorems]
+    logger.info(f"{len(theorems)} theorems loaded from {data_path}")
+
+    metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
+    repo = LeanGitRepo(metadata["from_repo"]["url"], metadata["from_repo"]["commit"])
+
+    return repo, theorems, positions, tactics
+
+def evaluate(
+    data_path: str,
+    exp_id: Optional[str] = None,
+    split: str = "val",
+    file_path: Optional[str] = None,
+    full_name: Optional[str] = None,
+    name_filter: Optional[str] = None,
+    num_theorems: Optional[int] = None,
+    ckpt_path: Optional[str] = None,
+    indexed_corpus_path: Optional[str] = None,
+    tactic: Optional[str] = None,
+    module: Optional[str] = None,
+    num_sampled_tactics: int = 64,
+    timeout: int = 600,
+    num_cpus: int = 1,
+    with_gpus: bool = False,
+    verbose: bool = False,
+    use_RMT: bool = False,
+    shared_gpu: bool = False
+) -> float:
+    set_logger(verbose)
+
+    repo, theorems, positions = _get_theorems(
+        data_path, split, file_path, full_name, name_filter, num_theorems
+    )
+
+    # Search for proofs using multiple concurrent provers.
+    prover = DistributedProver(
+        ckpt_path,
+        indexed_corpus_path,
+        tactic,
+        module,
+        num_cpus,
+        with_gpus=with_gpus,
+        timeout=timeout,
+        num_sampled_tactics=num_sampled_tactics,
+        debug=verbose,
+        use_RMT=use_RMT,
+        shared_gpu=shared_gpu,
+    )
+    results = prover.search_unordered(repo, theorems, positions)
+
+    # Calculate the result statistics.
+    num_proved = num_failed = num_discarded = 0
+    for r in results:
+        if r is None:
+            num_discarded += 1
+        elif r.status == Status.PROVED:
+            num_proved += 1
+        else:
+            num_failed += 1
+
+    logger.info(
+        f"Evaluation done! {num_proved} theorems proved, {num_failed} theorems failed, {num_discarded} non-theorems discarded"
+    )
+
+    if num_proved + num_failed == 0:
+        pass_1 = float("nan")
+    else:
+        pass_1 = num_proved / (num_proved + num_failed)
+
+    # Save the results.
+    if exp_id is None:
+        exp_id = str(uuid.uuid4())
+    pickle_path = f"{exp_id}_results.pickle"
+    pickle.dump(results, open(pickle_path, "wb"))
+    logger.info(f"Results saved to {pickle_path}")
+
+    return pass_1
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -87,6 +229,7 @@ def main() -> None:
         required=True,
         help="Path to the data extracted by LeanDojo (e.g., data/leandojo_benchmark/random).",
     )
+
     parser.add_argument(
         "--split",
         type=str,
@@ -149,9 +292,13 @@ def main() -> None:
     logger.info(args)
 
     repo, theorems, positions = _get_theorems(args)
-
-    # Search for proofs using multiple concurrent provers.
-    prover = DistributedProver(
+        args.data_path,
+        args.exp_id,
+        args.split,
+        args.file_path,
+        args.full_name,
+        args.name_filter,
+        args.num_theorems,
         args.ckpt_path,
         args.indexed_corpus_path,
         args.tactic,
@@ -162,34 +309,10 @@ def main() -> None:
         num_sampled_tactics=args.num_sampled_tactics,
         debug=args.verbose,
         use_RMT=args.use_rmt,
-        shared_gpu=args.shared_gpu
+        shared_gpu=args.shared_gpu,
     )
-    results = prover.search_unordered(repo, theorems, positions)
 
-    # Calculate the result statistics.
-    num_proved = num_failed = num_discarded = 0
-    for r in results:
-        if r is None:
-            num_discarded += 1
-        elif r.status == Status.PROVED:
-            num_proved += 1
-        else:
-            num_failed += 1
-
-    logger.info(
-        f"Evaluation done! {num_proved} theorems proved, {num_failed} theorems failed, {num_discarded} non-theorems discarded"
-    )
-    if num_proved + num_failed == 0:
-        logger.info("Pass@1 : NaN")
-    else:
-        logger.info(f"Pass@1: {num_proved / (num_proved + num_failed)}")
-
-    # Save the results.
-    if args.exp_id is not None:
-        pickle_path = f"{args.exp_id}_results.pickle"
-        pickle.dump(results, open(pickle_path, "wb"))
-        logger.info(f"Results saved to {pickle_path}")
-
+    logger.info(f"Pass@1: {pass_1}")
 
 if __name__ == "__main__":
     main()

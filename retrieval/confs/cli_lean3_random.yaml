@@ -9,9 +9,8 @@ trainer:
       stage: 2
       offload_optimizer: false
       cpu_checkpointing: false
-  accumulate_grad_batches: 4
   gradient_clip_val: 1.0
-  max_steps: 500000
+  max_steps: 800000
   callbacks:
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args: 
@@ -31,15 +30,8 @@ trainer:
         verbose: true
 
 model:
-  context_model:
-      class_path: retrieval.model_2encoders.T5Seq2VecModel
-      init_args:
-          model_name: kaiyuy/leandojo-lean3-retriever-byt5-small
-  premise_model:
-      class_path: retrieval.model_2encoders.LLaMaSeq2VecModel
-      init_args:
-          model_name: EleutherAI/llemma_7b
-  lr: 2e-4
+  model_name: google/byt5-small
+  lr: 1e-4
   warmup_steps: 2000
   num_retrieved: 100
 
@@ -48,9 +40,7 @@ data:
   corpus_path: data/leandojo_benchmark/corpus.jsonl
   num_negatives: 3
   num_in_file_negatives: 1
-  context_tokenizer_name: kaiyuy/leandojo-lean3-retriever-byt5-small
-  premise_tokenizer_name: EleutherAI/llemma_7b
-  batch_size: 2
-  eval_batch_size: 32
-  max_seq_len: 128
-  num_workers: 8
+  batch_size: 8
+  eval_batch_size: 64
+  max_seq_len: 1024
+  num_workers: 4
