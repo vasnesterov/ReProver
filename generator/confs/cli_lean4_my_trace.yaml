@@ -11,7 +11,7 @@ trainer:
       cpu_checkpointing: false
   gradient_clip_val: 1.0
   max_steps: 500000
-  check_val_every_n_epoch: 2
+  check_val_every_n_epoch: 1
   num_sanity_val_steps: 0
   callbacks:
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
@@ -19,17 +19,8 @@ trainer:
         logging_interval: step
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        verbose: true
-        save_top_k: 1
-        save_last: true
-        monitor: Pass@1_val
-        mode: max
-    - class_path: pytorch_lightning.callbacks.EarlyStopping
-      init_args:
-        monitor: Pass@1_val
-        patience: 3
-        mode: max
-        verbose: true
+        every_n_epochs: 1
+        save_top_k: -1   
 
 model:
   model_name: google/byt5-small
@@ -53,3 +44,4 @@ data:
   p_drop: 0.5
   normalize_tactics: true
   num_workers: 8
+  use_raw_data: true
