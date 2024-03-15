@@ -36,7 +36,7 @@ class GeneratorDataset(Dataset):
         normalize_tactics: bool,
         tokenizer: ByT5Tokenizer,
         is_train: bool,
-        is_raw_data: bool = False,
+        use_raw_data: bool = False,
     ) -> None:
         super().__init__()
         self.corpus = corpus
@@ -47,7 +47,7 @@ class GeneratorDataset(Dataset):
         self.p_drop = p_drop
         self.tokenizer = tokenizer
         self.is_train = is_train
-        if is_raw_data: 
+        if use_raw_data: 
             self.data = self._load_raw_data(data_path)
         else:
             self.data = self._load_data(data_path, normalize_tactics)
@@ -151,6 +151,7 @@ class GeneratorDataModule(pl.LightningDataModule):
         num_workers: int,
         corpus_path: Optional[str] = None,
         preds_path: Optional[str] = None,
+        use_raw_data: bool = False
     ) -> None:
         super().__init__()
         self.data_path = data_path
@@ -177,6 +178,8 @@ class GeneratorDataModule(pl.LightningDataModule):
             for pred in pickle.load(open(preds_path, "rb")):
                 ctx = pred["context"]
                 self.preds[ctx.path, ctx.theorem_full_name, ctx.state] = pred
+        
+        self.use_raw_data = use_raw_data
 
     def prepare_data(self) -> None:
         pass
@@ -194,6 +197,7 @@ class GeneratorDataModule(pl.LightningDataModule):
                 self.normalize_tactics,
                 self.tokenizer,
                 is_train=True,
+                use_raw_data=self.use_raw_data,
             )
 
         if stage in (None, "fit", "validate"):
@@ -208,6 +212,7 @@ class GeneratorDataModule(pl.LightningDataModule):
                 self.normalize_tactics,
                 self.tokenizer,
                 is_train=False,
+                use_raw_data=self.use_raw_data,
             )
 
     def train_dataloader(self) -> DataLoader:
