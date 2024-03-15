@@ -2,7 +2,7 @@ import subprocess
 
 file = 'nohup.out'
 
-cmd = f'grep "proof!" {file} | wc -l && grep "best" {file} | wc -l'
+cmd = f'grep "proof!" {file} | wc -l && grep "Proving Theorem" {file} | wc -l'
 
 # Running the command
 process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

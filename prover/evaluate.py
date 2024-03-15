@@ -18,7 +18,6 @@ from common import set_logger
 from prover.proof_search_fast import Status, DistributedProver
 # from prover.trace import Status, DistributedProver
 
-def _get_theorems(args) -> Tuple[LeanGitRepo, List[Theorem], List[Pos]]:
 def _get_theorems(
     data_path: str,
     split: str,
@@ -185,8 +184,8 @@ def evaluate(
         timeout=timeout,
         num_sampled_tactics=num_sampled_tactics,
         debug=verbose,
-        use_RMT=use_RMT,
-        shared_gpu=shared_gpu,
+        # use_RMT=use_RMT,
+        # shared_gpu=shared_gpu,
     )
     results = prover.search_unordered(repo, theorems, positions)
 
@@ -291,7 +290,7 @@ def main() -> None:
     logger.info(f"PID: {os.getpid()}")
     logger.info(args)
 
-    repo, theorems, positions = _get_theorems(args)
+    pass_1 = evaluate(
         args.data_path,
         args.exp_id,
         args.split,
@@ -307,7 +306,7 @@ def main() -> None:
         with_gpus=args.with_gpus,
         timeout=args.timeout,
         num_sampled_tactics=args.num_sampled_tactics,
-        debug=args.verbose,
+        verbose=args.verbose,
         use_RMT=args.use_rmt,
         shared_gpu=args.shared_gpu,
     )
