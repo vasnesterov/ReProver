@@ -1,13 +1,14 @@
 import random
-import numpy as np
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import jsonlines
+import numpy as np
 import pandas as pd
 import tqdm
 from jsonargparse import ArgumentParser
 from jsonargparse.typing import Path_fc, Path_fr
+
 from reprover.common import Context, Corpus, Premise
 from reprover.retrieval.datamodule import RetrievalDataset
 
@@ -78,10 +79,13 @@ def get_premises_from_dataset(
     retrieval_dataset: RetrievalDataset, return_pandas: bool = False
 ) -> Union[PremiseOrQueryDataset, pd.DataFrame]:
     premises = PremiseOrQueryDataset(key_name="pid", value_name="premise")
-    for example in retrieval_dataset.data:
-        premises.add(example["pos_premise"])
-        for pos_premise in example["all_pos_premises"]:
-            premises.add(pos_premise)
+    # for example in retrieval_dataset.data:
+    #     premises.add(example["pos_premise"])
+    #     for pos_premise in example["all_pos_premises"]:
+    #         premises.add(pos_premise)
+    for pr in retrieval_dataset.corpus.all_premises:
+        premises.add(pr)
+
     if return_pandas:
         return premises.to_frame()
     return premises

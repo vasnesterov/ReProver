@@ -3,6 +3,7 @@
 import math
 import os
 import pickle
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
@@ -10,48 +11,69 @@ import pytorch_lightning as pl
 import torch
 from lean_dojo import Pos
 from loguru import logger
-from reprover.common import Corpus, Premise, get_optimizers, load_checkpoint, zip_strict
-from transformers import AutoTokenizer, T5EncoderModel
+
+from reprover.common import Corpus, Premise, get_optimizers, zip_strict
 
 torch.set_float32_matmul_precision("medium")
 
 
-class BasePremiseRetriever(pl.LightningModule):
-    def __init__(
-        self,
-        model_name: str,
-        lr: float,
-        warmup_steps: int,
-        max_seq_len: int,
-        num_retrieved: int = 100,
-    ) -> None:
-        super().__init__()
-        self.save_hyperparameters()
-        self.lr = lr
-        self.warmup_steps = warmup_steps
-        self.num_retrieved = num_retrieved
-        self.max_seq_len = max_seq_len
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.encoder = T5EncoderModel.from_pretrained(model_name)
-        self.embeddings_staled = True
-
-    @classmethod
-    def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":
-        return load_checkpoint(cls, ckpt_path, device, freeze)
-
-    def load_corpus(self, path_or_corpus: Union[str, Corpus]) -> None:
-        """Associate the retriever with a corpus."""
-        raise NotImplementedError
-
+class PremiseRetrieverAPI(ABC):
     @property
+    @abstractmethod
     def embedding_size(self) -> int:
         """Return the size of the feature vector produced by ``encoder``."""
-        return self.encoder.config.hidden_size
+        pass
 
-    def _encode(self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor) -> torch.FloatTensor:
+    @classmethod
+    @abstractmethod
+    def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":
+        pass
+
+    @abstractmethod
+    def load_corpus(self, path_or_corpus: Union[str, Corpus]) -> None:
+        """Associate the retriever with a corpus."""
+        pass
+
+    @abstractmethod
+    def _encode(
+        self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
+    ) -> torch.FloatTensor:
         """Encode a premise or a context into a feature vector."""
-        raise NotImplementedError
+        pass
 
+    @torch.no_grad()
+    @abstractmethod
+    def reindex_corpus(self, batch_size: int) -> None:
+        """Re-index the retrieval corpus using the up-to-date encoder."""
+        pass
+
+    @abstractmethod
+    def retrieve_from_preprocessed(
+        self, batch: Dict[str, Any]
+    ) -> Tuple[List[Premise], List[float]]:
+        """Retrieve premises and scores from a tokenized batch"""
+        pass
+
+    @abstractmethod
+    def retrieve(
+        self,
+        state: List[str],
+        file_name: List[str],
+        theorem_full_name: List[str],
+        theorem_pos: List[Pos],
+        k: int,
+    ) -> Tuple[List[Premise], List[float]]:
+        """Retrieve ``k`` premises from ``corpus`` using ``state`` and ``tactic_prefix`` as context."""
+        pass
+
+
+class BasePremiseRetriever(pl.LightningModule, PremiseRetrieverAPI):
+    @classmethod
+    @abstractmethod
+    def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":
+        pass
+
+    @abstractmethod
     def forward(
         self,
         context_ids: torch.LongTensor,
@@ -63,11 +85,7 @@ class BasePremiseRetriever(pl.LightningModule):
         label: torch.LongTensor,
     ) -> torch.FloatTensor:
         """Compute the contrastive loss for premise retrieval."""
-        raise NotImplementedError
-
-    ############
-    # Training #
-    ############
+        pass
 
     def on_fit_start(self) -> None:
         if self.logger is not None:
@@ -88,7 +106,9 @@ class BasePremiseRetriever(pl.LightningModule):
             batch["neg_premises_mask"],
             batch["label"],
         )
-        self.log("loss_train", loss, on_epoch=True, sync_dist=True, batch_size=len(batch))
+        self.log(
+            "loss_train", loss, on_epoch=True, sync_dist=True, batch_size=len(batch)
+        )
         return loss
 
     def on_train_batch_end(self, outputs, batch, _) -> None:
@@ -96,20 +116,9 @@ class BasePremiseRetriever(pl.LightningModule):
         self.embeddings_staled = True
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        return get_optimizers(self.parameters(), self.trainer, self.lr, self.warmup_steps)
-
-    ##############
-    # Validation #
-    ##############
-
-    @torch.no_grad()
-    def reindex_corpus(self, batch_size: int) -> None:
-        """Re-index the retrieval corpus using the up-to-date encoder."""
-        raise NotImplementedError
-
-    def retrieve_from_preprocessed(self, batch: Dict[str, Any]) -> Tuple[List[Premise], List[float]]:
-        """Retrieve premises and scores from a tokenized batch"""
-        raise NotImplementedError
+        return get_optimizers(
+            self.parameters(), self.trainer, self.lr, self.warmup_steps
+        )
 
     def on_validation_start(self) -> None:
         self.reindex_corpus(self.trainer.datamodule.eval_batch_size)
@@ -125,11 +134,15 @@ class BasePremiseRetriever(pl.LightningModule):
         num_with_premises = 0
         tb = self.logger.experiment
 
-        for i, (all_pos_premises, premises) in enumerate(zip_strict(batch["all_pos_premises"], retrieved_premises)):
+        for i, (all_pos_premises, premises) in enumerate(
+            zip_strict(batch["all_pos_premises"], retrieved_premises)
+        ):
             # Only log the first example in the batch.
             if i == 0:
                 msg_gt = "\n\n".join([p.serialize() for p in all_pos_premises])
-                msg_retrieved = "\n\n".join([f"{j}. {p.serialize()}" for j, p in enumerate(premises)])
+                msg_retrieved = "\n\n".join(
+                    [f"{j}. {p.serialize()}" for j, p in enumerate(premises)]
+                )
                 TP = len(set(premises).intersection(all_pos_premises))
                 if len(all_pos_premises) == 0:
                     r = math.nan
@@ -172,10 +185,6 @@ class BasePremiseRetriever(pl.LightningModule):
             sync_dist=True,
             batch_size=num_with_premises,
         )
-
-    ##############
-    # Prediction #
-    ##############
 
     def on_predict_start(self) -> None:
         self.corpus = self.trainer.datamodule.corpus
@@ -233,14 +242,3 @@ class BasePremiseRetriever(pl.LightningModule):
             logger.info(f"Retrieval predictions saved to {path}")
 
         self.predict_step_outputs.clear()
-
-    def retrieve(
-        self,
-        state: List[str],
-        file_name: List[str],
-        theorem_full_name: List[str],
-        theorem_pos: List[Pos],
-        k: int,
-    ) -> Tuple[List[Premise], List[float]]:
-        """Retrieve ``k`` premises from ``corpus`` using ``state`` and ``tactic_prefix`` as context."""
-        raise NotImplementedError
