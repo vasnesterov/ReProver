@@ -16,7 +16,6 @@ from colbert.utils.utils import create_directory
 class ColBERTIndexer(Indexer):
     def __init__(
         self,
-        index_root: str,
         checkpoint: Checkpoint,
         config: Optional[ColBERTConfig] = None,
         verbose: int = 3,
@@ -24,7 +23,7 @@ class ColBERTIndexer(Indexer):
         """
         Use Run().context() to choose the run's configuration. They are NOT extracted from `config`.
         """
-        self.index_path = index_root
+        self.index_path = None
         self.verbose = verbose
         self.checkpoint = checkpoint
 
