@@ -491,7 +491,7 @@ class DistributedProver:
         if with_gpus:
             logger.info(f"Launching {num_cpus} GPU workers.")
             if not shared_gpu:
-                logger.info(f"GPU is not shared among workers.")
+                logger.info(f"GPU is NOT shared among workers.")
                 provers = [
                     GpuProver.remote(
                         ckpt_path,

@@ -184,8 +184,8 @@ def evaluate(
         timeout=timeout,
         num_sampled_tactics=num_sampled_tactics,
         debug=verbose,
-        # use_RMT=use_RMT,
-        # shared_gpu=shared_gpu,
+        use_RMT=use_RMT,
+        shared_gpu=shared_gpu,
     )
     results = prover.search_unordered(repo, theorems, positions)
 
