@@ -9,4 +9,8 @@ python scripts/train_colbert_v1.py \
   --run.nranks 1 \
   --run.gpus 1 \
   \
-  --colbert.bsize 1
+  --pretrained_checkpoint 'google-bert/bert-base-cased' \
+  --colbert.query_maxlen 512 \
+  --colbert.doc_maxlen 512 \
+  --colbert.bsize 48
+  #--pretrained_checkpoint 'google/byT5-small'
