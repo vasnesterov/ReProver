@@ -9,8 +9,11 @@ python scripts/train_colbert_v1.py \
   --run.nranks 1 \
   --run.gpus 1 \
   \
-  --pretrained_checkpoint 'google-bert/bert-base-cased' \
+  --pretrained_checkpoint 'FacebookAI/roberta-base' \
+  --colbert.use_ib_negatives true \
   --colbert.query_maxlen 512 \
   --colbert.doc_maxlen 512 \
-  --colbert.bsize 48
+  --colbert.lr 1e-4 \
+  --colbert.warmup 2000 \
+  --colbert.bsize 32
   #--pretrained_checkpoint 'google/byT5-small'
