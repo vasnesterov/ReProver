@@ -1,7 +1,7 @@
+from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import torch
-from colbert import Indexer
 from colbert.data import Collection
 from colbert.infra.config import ColBERTConfig
 from colbert.searcher import Searcher
@@ -10,7 +10,8 @@ from loguru import logger
 from tqdm import tqdm
 
 from reprover.common import Context, Corpus, Premise, zip_strict
-from reprover.retrieval.base_model import PremiseRetrieverAPI
+from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetrieverAPI
+from reprover.retrieval.colbert.indexer import ColBERTIndexer
 
 torch.set_float32_matmul_precision("medium")
 
@@ -19,6 +20,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI, Searcher):
     def __init__(
         self,
         index_name: str,
+        experiment_name: str,
         checkpoint_path_or_name: Optional[str] = None,
         collection: Optional[Union[str, Collection]] = None,
         config: Optional[Union[str, ColBERTConfig]] = None,
@@ -26,25 +28,40 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI, Searcher):
         num_retrieved: int = 100,
         verbose: int = 3,
     ) -> None:
-        super(Searcher, self).__init__(
+        Searcher.__init__(
+            self,
             index=index_name,
             checkpoint=checkpoint_path_or_name,
             collection=collection,
             config=config,
-            index_root=index_root,
+            index_root=Path(index_root) / experiment_name / "indexes",
             verbose=verbose,
         )
-        self.indexer = Indexer(checkpoint_path_or_name)
+        self.indexer = ColBERTIndexer(self.checkpoint)
+        self.indexer.configure(
+            root=index_root,
+            experiment=experiment_name,
+        )
+        self.index_name = index_name
         self.num_retrieved = num_retrieved
+        self.corpus = None
 
     @property
     def embedding_size(self) -> int:
         """Return the size of the feature vector produced by ``encoder``."""
         return self.config.dim
 
+    @classmethod
+    def load(cls, ckpt_path: str, device, freeze: bool) -> BasePremiseRetriever:
+        # return super().load(ckpt_path, device, freeze)
+        pass
+
     def load_corpus(self, path_or_corpus: Union[str, Corpus]) -> None:
         """Associate the retriever with a corpus."""
-        pass
+        if isinstance(path_or_corpus, Corpus):
+            self.corpus = path_or_corpus
+        else:
+            self.corpus = Corpus(path_or_corpus)
 
     def _encode_context(
         self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
@@ -67,42 +84,28 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI, Searcher):
     @torch.no_grad()
     def reindex_corpus(self, batch_size: int) -> None:
         """Re-index the retrieval corpus using the up-to-date encoder."""
-        if not self.embeddings_staled:
-            return
-        logger.info("Re-indexing the retrieval corpus")
-
-        self.corpus_embeddings = torch.zeros(
-            len(self.corpus.all_premises),
-            self.embedding_size,
-            dtype=self.encoder.dtype,
-            device=self.device,
-        )
-
-        for i in tqdm(range(0, len(self.corpus), batch_size)):
-            batch_premises = self.corpus.all_premises[i : i + batch_size]
-            tokenized_premises = self.tokenizer(
-                [p.serialize() for p in batch_premises],
-                padding="longest",
-                max_length=self.max_seq_len,
-                truncation=True,
-                return_tensors="pt",
-            ).to(self.device)
-            self.corpus_embeddings[i : i + batch_size] = self._encode(
-                tokenized_premises.input_ids, tokenized_premises.attention_mask
+        index_bsize = self.config.index_bsize
+        try:
+            self.indexer.configure(index_bsize=batch_size)
+            self.indexer.index(
+                self.index_name, collection=self.collection, overwrite=True
             )
-
-        self.embeddings_staled = False
+        finally:
+            self.configure(index_bsize=index_bsize)
 
     def retrieve_from_preprocessed(self, batch):
-        raise NotImplementedError
         context_emb = self._encode_context(batch["context_ids"], batch["context_mask"])
-        assert not self.embeddings_staled
-        retrieved_premises, scores = self.corpus.get_nearest_premises(
-            self.corpus_embeddings,
-            batch["context"],
-            context_emb,
-            self.num_retrieved,
-        )
+        retrieved_premises, retrieved_scores = [], []
+        for query_idx in tqdm(range(len(context_emb))):
+            pids, ranks, scores = self.dense_search(
+                context_emb[query_idx : query_idx + 1],
+                self.num_retrieved,
+                filter_fn=None,
+                pids=None,
+            )
+            retrieved_premises.append([self.corpus.all_premises[pid] for pid in pids])
+            retrieved_scores.append(scores)
+
         return retrieved_premises, scores
 
     def retrieve(
@@ -113,20 +116,28 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI, Searcher):
         theorem_pos: List[Pos],
         k: int,
         reindex_batch_size: int = 32,
+        do_reindex: bool = True,
     ) -> Tuple[List[Premise], List[float]]:
         """Retrieve ``k`` premises from ``corpus`` using ``state`` and ``tactic_prefix`` as context."""
-        self.reindex_corpus(batch_size=reindex_batch_size)
+        assert self.corpus is not None
+        if do_reindex:
+            self.reindex_corpus(batch_size=reindex_batch_size)
 
         contexts = [
             Context(*args).serialize()
             for args in zip_strict(file_name, theorem_full_name, theorem_pos, state)
         ]
-        ranking = self.searcher.search_all(
-            contexts,
-            k=self.num_retrieved,
+        ranking = self.search_all(
+            {i: ctx for i, ctx in enumerate(contexts)},
+            k=k,
             filter_fn=None,
             full_length_search=False,
             qid_to_pids=None,
         )
+        retrieved_premises, retrieved_scores = [], []
+        for i in range(len(contexts)):
+            pids, ranks, scores = zip(*ranking.data[i])
+            retrieved_premises.append([self.corpus.all_premises[pid] for pid in pids])
+            retrieved_scores.append(scores)
 
-        return ranking
+        return ranking, retrieved_premises, retrieved_scores

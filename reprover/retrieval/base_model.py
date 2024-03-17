@@ -35,11 +35,24 @@ class PremiseRetrieverAPI(ABC):
         pass
 
     @abstractmethod
-    def _encode(
+    def _encode_context(
         self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
     ) -> torch.FloatTensor:
         """Encode a premise or a context into a feature vector."""
         pass
+
+    @abstractmethod
+    def _encode_premise(
+        self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
+    ) -> torch.FloatTensor:
+        """Encode a premise or a context into a feature vector."""
+        pass
+
+    def _encode(
+        self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
+    ) -> torch.FloatTensor:
+        """Alias for _encode_context()"""
+        return self._encode_context(input_ids, attention_mask)
 
     @torch.no_grad()
     @abstractmethod

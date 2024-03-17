@@ -9,8 +9,14 @@ from typing import List, Optional
 
 import pytorch_lightning as pl
 import torch
+from colbert.infra.config import ColBERTConfig
+from colbert.modeling.tokenization import DocTokenizer, QueryTokenizer
 from lean_dojo import LeanGitRepo, Pos
 from loguru import logger
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+from transformers import AutoTokenizer
+
 from reprover.common import (
     Batch,
     Context,
@@ -19,16 +25,12 @@ from reprover.common import (
     format_state,
     get_all_pos_premises,
 )
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-from transformers import AutoTokenizer
 
 
 class RetrievalDataset(Dataset):
     def __init__(
         self,
         data_paths: List[str],
-        uses_lean4: bool,
         corpus: Corpus,
         num_negatives: int,
         num_in_file_negatives: int,
@@ -241,7 +243,6 @@ class RetrievalDataModule(pl.LightningDataModule):
 
         metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
         repo = LeanGitRepo(**metadata["from_repo"])
-        self.uses_lean4 = repo.uses_lean4
 
     def prepare_data(self) -> None:
         pass
@@ -250,7 +251,6 @@ class RetrievalDataModule(pl.LightningDataModule):
         if stage in (None, "fit"):
             self.ds_train = RetrievalDataset(
                 [os.path.join(self.data_path, "train.json")],
-                self.uses_lean4,
                 self.corpus,
                 self.num_negatives,
                 self.num_in_file_negatives,
@@ -263,7 +263,6 @@ class RetrievalDataModule(pl.LightningDataModule):
         if stage in (None, "fit", "validate"):
             self.ds_val = RetrievalDataset(
                 [os.path.join(self.data_path, "val.json")],
-                self.uses_lean4,
                 self.corpus,
                 self.num_negatives,
                 self.num_in_file_negatives,
@@ -279,7 +278,6 @@ class RetrievalDataModule(pl.LightningDataModule):
                     os.path.join(self.data_path, f"{split}.json")
                     for split in ("train", "val", "test")
                 ],
-                self.uses_lean4,
                 self.corpus,
                 self.num_negatives,
                 self.num_in_file_negatives,
@@ -321,3 +319,44 @@ class RetrievalDataModule(pl.LightningDataModule):
             pin_memory=True,
             drop_last=False,
         )
+
+
+class ColBERTRetrievalDataModule(RetrievalDataModule):
+    def __init__(
+        self,
+        data_path: str,
+        corpus_path: str,
+        num_negatives: int,
+        num_in_file_negatives: int,
+        colbert_config: ColBERTConfig,
+        batch_size: int,
+        eval_batch_size: int,
+        max_seq_len: int,
+        num_workers: int,
+        verbose: int = 3,
+    ) -> None:
+        super(RetrievalDataModule, self).__init__()
+        self.data_path = data_path
+        self.num_negatives = num_negatives
+        assert 0 <= num_in_file_negatives <= num_negatives
+        self.num_in_file_negatives = num_in_file_negatives
+        self.batch_size = batch_size
+        self.eval_batch_size = eval_batch_size
+        self.max_seq_len = max_seq_len
+        self.num_workers = num_workers
+
+        colbert_config = deepcopy(colbert_config)
+        colbert_config.configure(gpus=0)
+
+        self.context_tokenizer = QueryTokenizer(colbert_config, verbose=verbose)
+        self.premise_tokenizer = DocTokenizer(colbert_config)
+        if self.context_tokenizer.pad_token is None:
+            self.context_tokenizer.pad_token = self.context_tokenizer.unk_token
+
+        self.premise_tokenizer.pad_token = self.premise_tokenizer.tok.pad_token
+        if self.premise_tokenizer.pad_token is None:
+            self.premise_tokenizer.pad_token = self.premise_tokenizer.unk_token
+        self.corpus = Corpus(corpus_path)
+
+        metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
+        repo = LeanGitRepo(**metadata["from_repo"])
