@@ -78,11 +78,7 @@ def get_retrieval_dataset(
 def get_premises_from_dataset(
     retrieval_dataset: RetrievalDataset, return_pandas: bool = False
 ) -> Union[PremiseOrQueryDataset, pd.DataFrame]:
-    premises = PremiseOrQueryDataset(key_name="pid", value_name="premise")
-    # for example in retrieval_dataset.data:
-    #     premises.add(example["pos_premise"])
-    #     for pos_premise in example["all_pos_premises"]:
-    #         premises.add(pos_premise)
+    premises = PremiseOrQueryDataset(key_name="pid", value_name="passage")
     for pr in retrieval_dataset.corpus.all_premises:
         premises.add(pr)
 
