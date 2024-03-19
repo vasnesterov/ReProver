@@ -487,7 +487,7 @@ class DistributedProver:
             )
             return
 
-        ray.init()
+        ray.init(num_cpus=num_cpus * 2)
         if with_gpus:
             logger.info(f"Launching {num_cpus} GPU workers.")
             if not shared_gpu:
