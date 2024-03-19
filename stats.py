@@ -1,4 +1,12 @@
 import subprocess
+import psutil
+
+def check_memory_threshold():
+    """Check if more than 90% RAM is used."""
+    mem = psutil.virtual_memory()
+    used_percent = mem.percent
+    if used_percent > 90:
+        print(f"Warning: More than 90% of RAM is used. Used: {used_percent}%")
 
 file = 'nohup.out'
 
@@ -9,4 +17,7 @@ process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subpr
 out, err = process.communicate()
 
 proved, total = map(int, out.decode().strip().split('\n'))
-print(f"Total:\t{total}\nProved:\t{proved} ({round(proved/total*100, 1)}%)")
+print(f"Started:\t{total}\nProved:\t\t{proved} ({round(proved/total*100, 1)}%)")
+
+mem = psutil.virtual_memory()
+print(f"\nUsed memory:\t{mem.percent}%")
