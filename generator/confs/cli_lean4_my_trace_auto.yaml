@@ -31,7 +31,7 @@ model:
   ret_ckpt_path: null
   eval_num_retrieved: 100
   eval_num_cpus: 12
-  eval_num_theorems: 200
+  eval_num_theorems: 0
 
 data:
   data_path: data/my_trace/auto
