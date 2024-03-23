@@ -31,16 +31,17 @@ model:
   ret_ckpt_path: null
   eval_num_retrieved: 100
   eval_num_cpus: 12
-  eval_num_theorems: 200
+  eval_num_theorems: 0
 
 data:
-  data_path: data/my_trace
+  data_path: data/my_trace/auto
   corpus_path: null
   keep_marks: true
   preds_path: null
   batch_size: 8  # effective_batch_size == batch_size * accumulate_grad_batches * devices
   eval_batch_size: 64
-  max_seq_len: 2300
+  max_inp_seq_len: 2300
+  max_oup_seq_len: 512
   p_drop: 0.5
   normalize_tactics: true
   num_workers: 8
