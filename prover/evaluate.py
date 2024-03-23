@@ -68,10 +68,10 @@ def _get_theorems_from_files(
         repo = LeanGitRepo(t["url"], t["commit"])
         theorems.append(Theorem(repo, t["file_path"], t["full_name"]))
         positions.append(Pos(*t["start"]))
-    theorems = sorted(
-        theorems,
+    theorems, positions = zip(*sorted(
+        list(zip(theorems, positions)),
         key=lambda t: hashlib.md5(
-            (str(t.file_path) + ":" + t.full_name).encode()
+            (str(t[0].file_path) + ":" + t[0].full_name).encode()
         ).hexdigest(),
     )
     if num_theorems is not None:
@@ -130,12 +130,12 @@ def _get_theorems_tactics_from_files(
         theorems.append(Theorem(repo, t["file_path"], t["full_name"]))
         positions.append(Pos(*t["start"]))
         tactics.append([tac['tactic'] for tac in t['traced_tactics']])
-    # theorems = sorted(
-    #     theorems,
-    #     key=lambda t: hashlib.md5(
-    #         (str(t.file_path) + ":" + t.full_name).encode()
-    #     ).hexdigest(),
-    # )
+    theorems, positions, tactics = zip(*sorted(
+        list(zip(theorems, positions, tactics)),
+        key=lambda t: hashlib.md5(
+            (str(t[0].file_path) + ":" + t[0].full_name).encode()
+        ).hexdigest(),
+    )
     if num_theorems is not None:
         theorems = theorems[:num_theorems]
         positions = positions[:num_theorems]
