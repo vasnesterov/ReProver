@@ -73,7 +73,7 @@ def _get_theorems_from_files(
         key=lambda t: hashlib.md5(
             (str(t[0].file_path) + ":" + t[0].full_name).encode()
         ).hexdigest(),
-    )
+    ))
     if num_theorems is not None:
         theorems = theorems[:num_theorems]
         positions = positions[:num_theorems]
@@ -141,7 +141,7 @@ def _get_theorems_tactics_from_files(
         key=lambda t: hashlib.md5(
             (str(t[0].file_path) + ":" + t[0].full_name).encode()
         ).hexdigest(),
-    )
+    ))
     if num_theorems is not None:
         theorems = theorems[:num_theorems]
         positions = positions[:num_theorems]
