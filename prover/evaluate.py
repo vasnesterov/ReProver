@@ -84,15 +84,21 @@ def _get_theorems_from_files(
 
     return repo, theorems, positions
 
-# TODO: make args as in original
-def _get_theorems_with_tactics(args) -> Tuple[LeanGitRepo, List[Theorem], List[Pos], List[str]]:
+def _get_theorems_with_tactics(
+    data_path: str,
+    split: str,
+    file_path: str,
+    full_name: str,
+    name_filter: str,
+    num_theorems: int,
+) -> Tuple[LeanGitRepo, List[Theorem], List[Pos], List[str]]:
     repo, theorems, positions, tactics = _get_theorems_tactics_from_files(
-        args.data_path,
-        args.split,
-        args.file_path,
-        args.full_name,
-        args.name_filter,
-        args.num_theorems,
+        data_path,
+        split,
+        file_path,
+        full_name,
+        name_filter,
+        num_theorems,
     )
 
     all_repos = {thm.repo for thm in theorems}
