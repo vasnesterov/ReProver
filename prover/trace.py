@@ -42,7 +42,6 @@ class SearchResult:
     tactics_before_start: List[str]
     status: Status
     proof: Optional[List[str]]
-    tree: Node
 
     # Some statistics during proof search.
     actor_time: float
@@ -132,7 +131,6 @@ class BestFirstSearchProver:
                 tactics_before_start=tactics_before_start,
                 status=self.root.status,
                 proof=proof,
-                tree=self.root,
                 actor_time=self.actor_time,
                 environment_time=self.environment_time,
                 total_time=self.total_time,
@@ -224,8 +222,8 @@ class BestFirstSearchProver:
 
         path = str(self.theorem.file_path)
 
-        if self.theorem.repo != self.repo:
-            path = self.theorem.repo.get_packages_dir() / self.theorem.repo.name / path
+        # if self.theorem.repo != self.repo:
+        #     path = self.theorem.repo.get_packages_dir() / self.theorem.repo.name / path
 
         suggestions = self.tac_gen.generate(
             state=ts,
@@ -508,12 +506,11 @@ class DistributedProver:
             )
             return
 
-        #ray.init(_memory=200 * 1024**3, object_store_memory=100 * 1024**3) # 100 GB
-        ray.init()
+        ray.init(num_cpus=num_cpus * 2)
         if with_gpus:
             logger.info(f"Launching {num_cpus} GPU workers.")
             if not shared_gpu:
-                logger.info(f"GPU is not shared among workers.")
+                logger.info(f"GPU is NOT shared among workers.")
                 provers = [
                     GpuProver.remote(
                         ckpt_path,
