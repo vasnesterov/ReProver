@@ -15,8 +15,8 @@ from lean_dojo import LeanGitRepo, Theorem, Pos, is_available_in_cache
 from common import set_logger
 
 # from prover.proof_search import Status, DistributedProver
-# from prover.proof_search_fast import Status, DistributedProver
-from prover.trace import Status, DistributedProver
+from prover.proof_search_fast import Status, DistributedProver
+# from prover.trace import Status, DistributedProver
 
 def _get_theorems(
     data_path: str,
