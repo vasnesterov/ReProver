@@ -1,11 +1,6 @@
 import psutil
 import time
-
-TIMEOUT = 5
-# how many Lean instances are supposed to be
-N_LD = 2
-# threshold after that we kill zombies to clear RAM (in percent)
-MEMORY_THRESHOLD = 70
+import argparse
 
 def get_lean_processes():
     lean_processes = []
@@ -33,27 +28,32 @@ def kill_lean_processes(lean_processes):
         print(f"Killing process {proc.pid} - {proc.info['cmdline']}")
         proc.kill()
 
-def has_enough_memory():
+def has_enough_memory(threshold):
     mem = psutil.virtual_memory()
     used_percent = mem.percent
-    return used_percent < MEMORY_THRESHOLD
+    return used_percent < threshold
 
-def main():
+def main(args):
     """Main function to run the script."""
     while True:
-        time.sleep(TIMEOUT)
-        if has_enough_memory():
+        time.sleep(args.timeout)
+        if has_enough_memory(args.memory_threshold):
             continue
         lean_processes = get_lean_processes()
         if not lean_processes:
             continue
         goals = get_leandojo_goals(lean_processes)
         print(goals)
-        if len(goals) < N_LD:
+        if len(goals) < args.n_ld:
             continue
-        # assert len(goals) == N_LD
+        assert len(goals) == args.n_ld
         zombies = get_zombies(lean_processes, goals)
         kill_lean_processes(zombies)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Script description.")
+    parser.add_argument("-t", "--timeout", type=int, default=5, help="Timeout in seconds")
+    parser.add_argument("-n", "--n_ld", type=int, help="Number of Lean instances")
+    parser.add_argument("-m", "--memory_threshold", type=int, help="Memory threshold in percent")
+    args = parser.parse_args()
+    main(args)

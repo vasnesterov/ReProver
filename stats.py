@@ -8,6 +8,12 @@ def check_memory_threshold():
     if used_percent > 90:
         print(f"Warning: More than 90% of RAM is used. Used: {used_percent}%")
 
+def check_process_by_substring(substring):
+    for proc in psutil.process_iter(['pid', 'cmdline']):
+        if substring in ' '.join(proc.info['cmdline']):
+            return True
+    return False
+
 file = 'nohup.out'
 
 cmd = f'grep "proof!" {file} | wc -l && grep "Proving Theorem" {file} | wc -l'
@@ -21,3 +27,6 @@ print(f"Started:\t{total}\nProved:\t\t{proved} ({round(proved/total*100, 1)}%)")
 
 mem = psutil.virtual_memory()
 print(f"\nUsed memory:\t{mem.percent}%")
+
+status = "running" if check_process_by_substring("evaluate.py") else "finished"
+print(f"\nStatus:\t\t{status}")
