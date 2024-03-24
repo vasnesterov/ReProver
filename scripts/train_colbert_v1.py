@@ -1,16 +1,25 @@
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from colbert import Trainer
 from colbert.infra import ColBERTConfig, Run, RunConfig
 from jsonargparse import ArgumentParser
 from jsonargparse.typing import Path_dc, Path_fc, Path_fr
+from pytorch_lightning.loggers import WandbLogger
 
 
 def setup_parser():
     parser = ArgumentParser()
 
-    parser.add_argument('--run', type=RunConfig, default=RunConfig(), help="Run configuration")
-    parser.add_argument('--colbert', type=ColBERTConfig, default=ColBERTConfig(), help="Colbert configuration")
+    parser.add_argument(
+        "--run", type=RunConfig, default=RunConfig(), help="Run configuration"
+    )
+    parser.add_argument(
+        "--colbert",
+        type=ColBERTConfig,
+        default=ColBERTConfig(),
+        help="Colbert configuration",
+    )
+    parser.add_class_arguments(WandbLogger, nested_key='logger')
 
     parser.add_argument(
         "--data.triples_path",
@@ -30,7 +39,9 @@ def setup_parser():
     parser.add_argument("--experiment_root", type=Path_dc)
     parser.add_argument("--pretrained_checkpoint", type=Optional[Union[Path_fr, str]])
 
-    parser.link_arguments('experiment_root', 'colbert.root', compute_fn=lambda source: source.abs_path)
+    parser.link_arguments(
+        "experiment_root", "colbert.root", compute_fn=lambda source: source.abs_path
+    )
 
     return parser
 
@@ -42,6 +53,7 @@ def main(args):
             queries=args.data.queries_path.abs_path,
             collection=args.data.collection_path.abs_path,
             config=args.colbert,
+            logger=args.logger,
         )
 
         if args.pretrained_checkpoint is None:

@@ -7,8 +7,5 @@ python ./scripts/convert_data.py \
   --collection_save_path ./data/leandojo_benchmark_4/random/colbert_collection.tsv \
   --queries_save_path ./data/leandojo_benchmark_4/random/colbert_queries.json \
   --triples_save_path ./data/leandojo_benchmark_4/random/colbert_triples.json \
-  --num_negatives 1 \
-  --num_in_file_negatives 1
-
-
-
+  --num_negatives 64 \
+  --num_in_file_negatives 32

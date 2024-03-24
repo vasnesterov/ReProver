@@ -141,3 +141,47 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI, Searcher):
             retrieved_scores.append(scores)
 
         return ranking, retrieved_premises, retrieved_scores
+
+
+class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetriever):
+    def __init__(
+        self,
+        index_name: str,
+        experiment_name: str,
+        checkpoint_path_or_name: Optional[str] = None,
+        collection: Optional[Union[str, Collection]] = None,
+        config: Optional[Union[str, ColBERTConfig]] = None,
+        index_root: Optional[str] = None,
+        num_retrieved: int = 100,
+        verbose: int = 3,
+    ) -> None:
+        BasePremiseRetriever.__init__(self)
+        # self.save_hyperparameters()
+        ColBERTPremiseRetriever.__init__(
+            self,
+            index_name=index_name,
+            experiment_name=experiment_name,
+            checkpoint_path_or_name=checkpoint_path_or_name,
+            collection=collection,
+            config=config,
+            index_root=index_root,
+            num_retrieved=num_retrieved,
+            verbose=verbose,
+        )
+
+    @classmethod
+    def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":
+        raise NotImplementedError
+
+    def forward(
+        self,
+        context_ids: torch.LongTensor,
+        context_mask: torch.LongTensor,
+        pos_premise_ids: torch.LongTensor,
+        pos_premise_mask: torch.LongTensor,
+        neg_premises_ids: torch.LongTensor,
+        neg_premises_mask: torch.LongTensor,
+        label: torch.LongTensor,
+    ) -> torch.FloatTensor:
+        """Compute the contrastive loss for premise retrieval."""
+        raise NotImplementedError

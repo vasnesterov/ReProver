@@ -15,5 +15,7 @@ python scripts/train_colbert_v1.py \
   --colbert.doc_maxlen 512 \
   --colbert.lr 1e-4 \
   --colbert.warmup 2000 \
-  --colbert.bsize 32
-  #--pretrained_checkpoint 'google/byT5-small'
+  --colbert.bsize 32 \
+  --colbert.drop_duplciate_passages true \
+  --logger.save_dir ./experiments/colbert-v1 \
+  --logger.project lean-colbert

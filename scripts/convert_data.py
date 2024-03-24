@@ -8,7 +8,6 @@ import pandas as pd
 import tqdm
 from jsonargparse import ArgumentParser
 from jsonargparse.typing import Path_fc, Path_fr
-
 from reprover.common import Context, Corpus, Premise
 from reprover.retrieval.datamodule import RetrievalDataset
 
@@ -63,7 +62,6 @@ def get_retrieval_dataset(
 ) -> RetrievalDataset:
     retrieval_dataset = RetrievalDataset(
         premises_paths_list,
-        True,
         Corpus(corpus_path),
         num_negatives=num_negatives,
         num_in_file_negatives=num_in_file_negatives,
