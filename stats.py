@@ -10,7 +10,7 @@ def check_memory_threshold():
 
 def check_process_by_substring(substring):
     for proc in psutil.process_iter(['pid', 'cmdline']):
-        if substring in ' '.join(proc.info['cmdline']):
+        if proc.info['cmdline'] and substring in ' '.join(proc.info['cmdline']):
             return True
     return False
 

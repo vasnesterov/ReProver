@@ -13,7 +13,9 @@ def get_leandojo_goals(lean_processes):
     goals = []
     for proc in lean_processes:
         if 'lake env' in ' '.join(proc.info['cmdline']):
-            goals.append(proc.info['cmdline'][-1].strip())
+            lean_file = proc.info['cmdline'][-1].strip()
+            if lean_file != 'ExtractData.lean':
+                goals.append(lean_file)
     return goals
 
 def get_zombies(lean_processes, goals):
@@ -56,4 +58,5 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--n_ld", type=int, help="Number of Lean instances")
     parser.add_argument("-m", "--memory_threshold", type=int, help="Memory threshold in percent")
     args = parser.parse_args()
+    assert args.n_ld is not None and args.memory_threshold is not None
     main(args)
