@@ -4,6 +4,7 @@ import os
 import sys
 import ray
 import time
+import random
 import heapq
 import torch
 import asyncio
@@ -96,13 +97,14 @@ class BestFirstSearchProver:
                 try:
                     for tactic in tactics_before_start:
                         init_state = dojo.run_tac(init_state, tactic)
-                        if type(init_state) is ProofFinished:
+                        if isinstance(init_state, ProofFinished):
+                            logger.warning(f'State after tactics_before_start is ProofFinished')
                             return None
                 except BaseException as ex:
-                    logger.info(f'Hmmhm? {ex}')
+                    logger.warning(f"Error when running tactics_before_start: {ex}")
                     return None
-                if type(init_state) is not TacticState:
-                    logger.info(f'Hmmmm? {len(tactics_before_start)}')
+                if not isinstance(init_state, TacticState):
+                    logger.warning(f'State after tactics_before_start is not TacticState')
                     return None
             
                 self.root = InternalNode(
@@ -411,10 +413,11 @@ class AsyncGpuScheduler:
     def __init__(
         self,
         num_provers: int,
-        gpu_proxy: AsyncGpuProxy,
+        gpu_proxies: list[AsyncGpuProxy],
     ) -> None:
         self.queue = []
-        self.gpu_proxy = gpu_proxy
+        self.gpu_proxies = gpu_proxies
+        self.cur_gpu = 0 # index of gpu that will be loaded next
 
     async def generate(self, *args, **kwargs):
         out_future = asyncio.Future()
@@ -422,15 +425,19 @@ class AsyncGpuScheduler:
         output = await out_future
         return output
 
+    async def _set_result(self, args, kwargs, out_future):
+        output = await self.gpu_proxies[self.cur_gpu].generate.remote(*args, **kwargs)
+        out_future.set_result(output)
+
     async def run_main_loop(self):
         while True:
             if len(self.queue) == 0:
-                logger.debug("GPU is waiting")
-                await asyncio.sleep(1)
+                logger.debug("Queue is empty")
+                await asyncio.sleep(0.1)
                 continue
             args, kwargs, out_future = self.queue.pop(0)
-            output = await self.gpu_proxy.generate.remote(*args, **kwargs)
-            out_future.set_result(output)
+            asyncio.create_task(self._set_result(args, kwargs, out_future))
+            self.cur_gpu = (self.cur_gpu + 1) % len(self.gpu_proxies)
 
 @ray.remote
 class AsyncGpuProver(BestFirstSearchProver):
@@ -475,12 +482,11 @@ class DistributedProver:
         tactic: Optional[str],
         module: Optional[str],
         num_cpus: int,
-        with_gpus: bool,
+        num_gpus: int,
         timeout: int,
         num_sampled_tactics: int,
         debug: Optional[bool] = False,
         use_RMT=False,
-        shared_gpu=False,
     ) -> None:
         if ckpt_path is None:
             assert tactic and not indexed_corpus_path
@@ -494,7 +500,7 @@ class DistributedProver:
             else:
                 tacgen_class = RMTRetrievalAugmentedGenerator if use_RMT else RetrievalAugmentedGenerator
                 print(f"{tacgen_class=}")
-                device = torch.device("cuda") if with_gpus else torch.device("cpu")
+                device = torch.device("cuda") if num_gpus > 0 else torch.device("cpu")
                 tac_gen = tacgen_class.load(
                     ckpt_path, device=device, freeze=True
                 )
@@ -507,45 +513,29 @@ class DistributedProver:
             return
 
         ray.init(num_cpus=num_cpus * 2)
-        if with_gpus:
-            logger.info(f"Launching {num_cpus} GPU workers.")
-            if not shared_gpu:
-                logger.info(f"GPU is NOT shared among workers.")
-                provers = [
-                    GpuProver.remote(
-                        ckpt_path,
-                        indexed_corpus_path,
-                        tactic,
-                        module,
-                        timeout=timeout,
-                        num_sampled_tactics=num_sampled_tactics,
-                        debug=debug,
-                        use_RMT=use_RMT,
-                    )
-                    for _ in range(num_cpus)
-                ]
-            else:
-                logger.info(f"GPU is shared among workers.")
-                gpu_proxy = AsyncGpuProxy.remote(
-                    ckpt_path,
-                    indexed_corpus_path,
+        if num_gpus > 0:
+            logger.info(f"Launching {num_cpus} provers.")
+            logger.info(f"GPUs are shared among workers.")
+            gpu_proxies = [AsyncGpuProxy.remote(
+                ckpt_path,
+                indexed_corpus_path,
+                use_RMT=use_RMT,
+            ) for _ in range(num_gpus)]
+            tac_gen = AsyncGpuScheduler.remote(
+                num_cpus,
+                gpu_proxies,
+            )
+            tac_gen.run_main_loop.remote()
+            provers = [
+                AsyncGpuProver.remote(
+                    tac_gen=tac_gen,
+                    timeout=timeout,
+                    num_sampled_tactics=num_sampled_tactics,
+                    debug=debug,
                     use_RMT=use_RMT,
                 )
-                tac_gen = AsyncGpuScheduler.remote(
-                    num_cpus, 
-                    gpu_proxy,
-                )
-                tac_gen.run_main_loop.remote()
-                provers = [
-                    AsyncGpuProver.remote(
-                        tac_gen=tac_gen,
-                        timeout=timeout,
-                        num_sampled_tactics=num_sampled_tactics,
-                        debug=debug,
-                        use_RMT=use_RMT,
-                    )
-                    for _ in range(num_cpus)
-                ]
+                for _ in range(num_cpus)
+            ]
         else:
             logger.info(f"Launching {num_cpus} CPU workers.")
             provers = [
@@ -571,8 +561,10 @@ class DistributedProver:
         # init data for all proofstates in canonical proof
         inits = []
         for thm, pos, tacs in zip_strict(theorems, positions, tactics):
-            for depth in range(len(tactics)):
+            for depth in range(len(tacs)):
                 inits.append( (thm, pos, tacs[:depth].copy()) )
+        random.shuffle(inits)
+        logger.info(f"{len(inits)} goals are going to be proved.")
         
         if not self.distributed:
             return [

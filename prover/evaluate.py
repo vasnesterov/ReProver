@@ -15,8 +15,8 @@ from lean_dojo import LeanGitRepo, Theorem, Pos, is_available_in_cache
 from common import set_logger
 
 # from prover.proof_search import Status, DistributedProver
-from prover.proof_search_fast import Status, DistributedProver
-# from prover.trace import Status, DistributedProver
+# from prover.proof_search_fast import Status, DistributedProver
+from prover.trace import Status, DistributedProver
 
 def _get_theorems(
     data_path: str,
@@ -168,14 +168,13 @@ def evaluate(
     num_sampled_tactics: int = 64,
     timeout: int = 600,
     num_cpus: int = 1,
-    with_gpus: bool = False,
+    num_gpus: int = 0,
     verbose: bool = False,
     use_RMT: bool = False,
-    shared_gpu: bool = False
 ) -> float:
     set_logger(verbose)
 
-    repo, theorems, positions = _get_theorems(
+    repo, theorems, positions, tactics = _get_theorems_with_tactics(
         data_path, split, file_path, full_name, name_filter, num_theorems
     )
 
@@ -186,14 +185,13 @@ def evaluate(
         tactic,
         module,
         num_cpus,
-        with_gpus=with_gpus,
+        num_gpus,
         timeout=timeout,
         num_sampled_tactics=num_sampled_tactics,
         debug=verbose,
         use_RMT=use_RMT,
-        shared_gpu=shared_gpu,
     )
-    results = prover.search_unordered(repo, theorems, positions)
+    results = prover.search_unordered(repo, theorems, positions, tactics)
 
     # Calculate the result statistics.
     num_proved = num_failed = num_discarded = 0
@@ -275,10 +273,7 @@ def main() -> None:
         "--num-cpus", type=int, default=1, help="The number of concurrent provers."
     )
     parser.add_argument(
-        "--with-gpus", action="store_true", help="Use GPUs for proof search."
-    )
-    parser.add_argument(
-        "--shared-gpu", action="store_true", help="Use GPUs for proof search."
+        "--num-gpus", type=int, default=0, help="The number of GPUs for proof search (each handle its own copy of a model)"
     )
     
     parser.add_argument(
@@ -309,12 +304,11 @@ def main() -> None:
         args.tactic,
         args.module,
         num_cpus=args.num_cpus,
-        with_gpus=args.with_gpus,
+        num_gpus=args.num_gpus,
         timeout=args.timeout,
         num_sampled_tactics=args.num_sampled_tactics,
         verbose=args.verbose,
         use_RMT=args.use_rmt,
-        shared_gpu=args.shared_gpu,
     )
 
     logger.info(f"Pass@1: {pass_1}")

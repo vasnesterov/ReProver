@@ -44,6 +44,7 @@ def main(args):
             continue
         goals = get_leandojo_goals(lean_processes)
         print(goals)
+        print(len(goals))
         if len(goals) < args.n_ld:
             continue
         assert len(goals) == args.n_ld
