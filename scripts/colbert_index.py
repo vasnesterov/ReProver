@@ -5,14 +5,12 @@ from jsonargparse.typing import Path_dc, Path_fr, path_type
 
 Path_dr = path_type("dr")
 
-from reprover.retrieval.colbert.indexer import ColBERTIndexer
+from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
 
 
 def setup_parser():
     parser = ArgumentParser()
-    parser.add_argument(
-        "--checkpoint_path", type=Path_dr, help="Path to ColBERT checkpoint"
-    )
+    parser.add_argument("--checkpoint_path", type=Path_dr, help="Path to ColBERT checkpoint")
     parser.add_argument(
         "--collection_path",
         type=Path_fr,
@@ -23,12 +21,8 @@ def setup_parser():
         type=Path_dc,
         help="Path to the directory with index (can be existing path)",
     )
-    parser.add_argument(
-        "--experiment_name", type=str, help="Name of the experiment or index"
-    )
-    parser.add_argument(
-        "--index_name", type=str, help="Name of the experiment or index"
-    )
+    parser.add_argument("--experiment_name", type=str, help="Name of the experiment or index")
+    parser.add_argument("--index_name", type=str, help="Name of the experiment or index")
     parser.add_argument(
         "--index_bsize",
         type=int,

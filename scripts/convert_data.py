@@ -6,6 +6,7 @@ import jsonlines
 import numpy as np
 import pandas as pd
 import tqdm
+from joblib import Parallel, delayed
 from jsonargparse import ArgumentParser
 from jsonargparse.typing import Path_fc, Path_fr
 from reprover.common import Context, Corpus, Premise
@@ -27,9 +28,7 @@ class PremiseOrQueryDataset:
         self.id_to_txt[pid] = example
         self.txt_to_id[example] = pid
 
-    def get_id_by_example(
-        self, example: Union[Premise, Context], missing_ok: bool = False
-    ) -> Optional[int]:
+    def get_id_by_example(self, example: Union[Premise, Context], missing_ok: bool = False) -> Optional[int]:
         if missing_ok:
             return self.txt_to_id.get(example.serialize())
         return self.txt_to_id[example.serialize()]
@@ -40,9 +39,9 @@ class PremiseOrQueryDataset:
         return self.id_to_txt[id]
 
     def to_frame(self) -> pd.DataFrame:
-        df = pd.DataFrame(
-            list(self.id_to_txt.items()), columns=[self.key_name, self.value_name]
-        ).sort_values(self.key_name)
+        df = pd.DataFrame(list(self.id_to_txt.items()), columns=[self.key_name, self.value_name]).sort_values(
+            self.key_name
+        )
         return df
 
     def to_tsv(self, path) -> None:
@@ -118,18 +117,11 @@ def get_triples(
         negatives = []
 
         for i in range(num_negatives):
-            if (
-                i < len(example["neg_premises"])
-                and example["neg_premises"][i] is not None
-            ):
-                neg_premise_id = premises_dataset.get_id_by_example(
-                    example["neg_premises"][i], missing_ok=True
-                )
+            if i < len(example["neg_premises"]) and example["neg_premises"][i] is not None:
+                neg_premise_id = premises_dataset.get_id_by_example(example["neg_premises"][i], missing_ok=True)
                 if neg_premise_id is None:
                     premises_dataset.add(example["neg_premises"][i])
-                    neg_premise_id = premises_dataset.get_id_by_example(
-                        example["neg_premises"][i]
-                    )
+                    neg_premise_id = premises_dataset.get_id_by_example(example["neg_premises"][i])
 
             else:
                 while all_premises_ids[premises_ptr] == pos_premise_id:
@@ -147,6 +139,79 @@ def get_triples(
                 *negatives,
             )
         )
+
+    return triples
+
+
+def _process_batch(retrieval_dataset, premises_dataset, queries_dataset, num_negatives, start_idx, end_idx):
+    all_premises_ids = np.array(list(premises_dataset.id_to_txt.values()))
+    premises_ptr = 0
+    np.random.shuffle(all_premises_ids)
+
+    triples = []
+    for i in tqdm.tqdm(range(start_idx, end_idx)):
+        example = retrieval_dataset[i]
+        pos_premise_id = premises_dataset.get_id_by_example(example["pos_premise"])
+
+        negatives = []
+
+        for i in range(num_negatives):
+            if i < len(example["neg_premises"]) and example["neg_premises"][i] is not None:
+                neg_premise_id = premises_dataset.get_id_by_example(example["neg_premises"][i], missing_ok=True)
+                if neg_premise_id is None:
+                    premises_dataset.add(example["neg_premises"][i])
+                    neg_premise_id = premises_dataset.get_id_by_example(example["neg_premises"][i])
+
+            else:
+                while all_premises_ids[premises_ptr] == pos_premise_id:
+                    premises_ptr += 1
+                    if premises_ptr == len(all_premises_ids):
+                        premises_ptr = 0
+
+                neg_premise_id = all_premises_ids[premises_ptr]
+            negatives.append([neg_premise_id, 0.0])
+
+        triples.append(
+            (
+                i,
+                (
+                    queries_dataset.get_id_by_example(example["context"]),
+                    [pos_premise_id, 1.0],
+                    *negatives,
+                ),
+            )
+        )
+    return triples
+
+
+def get_triples_parallel(
+    premises_dataset: PremiseOrQueryDataset,
+    queries_dataset: PremiseOrQueryDataset,
+    retrieval_dataset: RetrievalDataset,
+    num_negatives: int = 1,
+    seed: Optional[int] = 1234,
+    n_jobs: int = 1,
+) -> List[Tuple[str, str, str]]:
+    random.seed(seed)
+    np.random.seed(seed)
+
+    batch_size = len(retrieval_dataset) // n_jobs
+
+    batch_indices = []
+    start_idx = 0
+    end_idx = batch_size
+    while start_idx < 62000:  # len(premises_dataset):
+        end_idx = min(start_idx + batch_size, len(retrieval_dataset))
+        batch_indices.append((start_idx, end_idx))
+        start_idx = end_idx
+
+    results = Parallel(n_jobs)(
+        delayed(_process_batch)(retrieval_dataset, premises_dataset, queries_dataset, num_negatives, start_idx, end_idx)
+        for start_idx, end_idx in batch_indices
+    )
+
+    results = sorted(results)
+    _, triples = zip(*sorted)
 
     return triples
 
@@ -169,9 +234,7 @@ def convert_to_colbert(
     )
     premises = get_premises_from_dataset(retrieval_dataset)
     queries = get_queries_from_dataset(retrieval_dataset)
-    triples = get_triples(
-        premises, queries, retrieval_dataset, num_negatives=num_negatives, seed=seed
-    )
+    triples = get_triples(premises, queries, retrieval_dataset, num_negatives=num_negatives, seed=seed)
 
     premises.to_tsv(collection_save_path)
     queries.to_json(queries_save_path)
@@ -183,9 +246,7 @@ def convert_to_colbert(
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument(
-        "--premises_paths_list", type=List[Path_fr], help="Paths to train/val/test.json"
-    )
+    parser.add_argument("--premises_paths_list", type=List[Path_fr], help="Paths to train/val/test.json")
     parser.add_argument("--corpus_path", type=Path_fr, help="Path to corpus")
     parser.add_argument(
         "--triples_save_path",
@@ -202,9 +263,7 @@ if __name__ == "__main__":
         type=Path_fc,
         help="Path to save premises in tsv format with ['id', 'premise']",
     )
-    parser.add_argument(
-        "--num_negatives", type=int, help="Number of negatives per query to generate"
-    )
+    parser.add_argument("--num_negatives", type=int, help="Number of negatives per query to generate")
     parser.add_argument(
         "--num_in_file_negatives",
         type=int,

@@ -9,13 +9,16 @@ python scripts/train_colbert_v1.py \
   --run.nranks 1 \
   --run.gpus 1 \
   \
-  --pretrained_checkpoint 'FacebookAI/roberta-base' \
+  --pretrained_checkpoint 'microsoft/deberta-v3-base' \
   --colbert.use_ib_negatives true \
-  --colbert.query_maxlen 512 \
-  --colbert.doc_maxlen 512 \
-  --colbert.lr 1e-4 \
-  --colbert.warmup 2000 \
-  --colbert.bsize 32 \
-  --colbert.drop_duplciate_passages true \
+  --colbert.query_maxlen 128 \
+  --colbert.doc_maxlen 128 \
+  --colbert.lr 1e-7 \
+  --colbert.warmup 20000 \
+  --colbert.bsize 4 \
+  --colbert.ignore_scores true \
+  --colbert.nway 8 \
+  --colbert.log_every null \
   --logger.save_dir ./experiments/colbert-v1 \
-  --logger.project lean-colbert
+  --logger.project "lean-colbert" \
+  --colbert.drop_duplciate_passages true

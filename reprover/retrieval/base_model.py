@@ -11,7 +11,6 @@ import pytorch_lightning as pl
 import torch
 from lean_dojo import Pos
 from loguru import logger
-
 from reprover.common import Corpus, Premise, get_optimizers, zip_strict
 
 torch.set_float32_matmul_precision("medium")
@@ -35,22 +34,16 @@ class PremiseRetrieverAPI(ABC):
         pass
 
     @abstractmethod
-    def _encode_context(
-        self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
-    ) -> torch.FloatTensor:
+    def _encode_context(self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor) -> torch.FloatTensor:
         """Encode a premise or a context into a feature vector."""
         pass
 
     @abstractmethod
-    def _encode_premise(
-        self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
-    ) -> torch.FloatTensor:
+    def _encode_premise(self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor) -> torch.FloatTensor:
         """Encode a premise or a context into a feature vector."""
         pass
 
-    def _encode(
-        self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
-    ) -> torch.FloatTensor:
+    def _encode(self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor) -> torch.FloatTensor:
         """Alias for _encode_context()"""
         return self._encode_context(input_ids, attention_mask)
 
@@ -61,9 +54,7 @@ class PremiseRetrieverAPI(ABC):
         pass
 
     @abstractmethod
-    def retrieve_from_preprocessed(
-        self, batch: Dict[str, Any]
-    ) -> Tuple[List[Premise], List[float]]:
+    def retrieve_from_preprocessed(self, batch: Dict[str, Any]) -> Tuple[List[Premise], List[float]]:
         """Retrieve premises and scores from a tokenized batch"""
         pass
 
@@ -119,9 +110,7 @@ class BasePremiseRetriever(pl.LightningModule, PremiseRetrieverAPI):
             batch["neg_premises_mask"],
             batch["label"],
         )
-        self.log(
-            "loss_train", loss, on_epoch=True, sync_dist=True, batch_size=len(batch)
-        )
+        self.log("loss_train", loss, on_epoch=True, sync_dist=True, batch_size=len(batch))
         return loss
 
     def on_train_batch_end(self, outputs, batch, _) -> None:
@@ -129,9 +118,7 @@ class BasePremiseRetriever(pl.LightningModule, PremiseRetrieverAPI):
         self.embeddings_staled = True
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        return get_optimizers(
-            self.parameters(), self.trainer, self.lr, self.warmup_steps
-        )
+        return get_optimizers(self.parameters(), self.trainer, self.lr, self.warmup_steps)
 
     def on_validation_start(self) -> None:
         self.reindex_corpus(self.trainer.datamodule.eval_batch_size)
@@ -147,15 +134,11 @@ class BasePremiseRetriever(pl.LightningModule, PremiseRetrieverAPI):
         num_with_premises = 0
         tb = self.logger.experiment
 
-        for i, (all_pos_premises, premises) in enumerate(
-            zip_strict(batch["all_pos_premises"], retrieved_premises)
-        ):
+        for i, (all_pos_premises, premises) in enumerate(zip_strict(batch["all_pos_premises"], retrieved_premises)):
             # Only log the first example in the batch.
             if i == 0:
                 msg_gt = "\n\n".join([p.serialize() for p in all_pos_premises])
-                msg_retrieved = "\n\n".join(
-                    [f"{j}. {p.serialize()}" for j, p in enumerate(premises)]
-                )
+                msg_retrieved = "\n\n".join([f"{j}. {p.serialize()}" for j, p in enumerate(premises)])
                 TP = len(set(premises).intersection(all_pos_premises))
                 if len(all_pos_premises) == 0:
                     r = math.nan

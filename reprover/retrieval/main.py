@@ -5,19 +5,20 @@ import os
 
 from loguru import logger
 from pytorch_lightning.cli import LightningCLI
-from reprover.retrieval.datamodule import RetrievalDataModule
-from reprover.retrieval.model import PremiseRetriever
+from reprover.retrieval.colbert_retrieval.datamodule import ColBERTDataModule
+from reprover.retrieval.colbert_retrieval.model import ColBERTPremiseRetrieverLightning
 
 
 class CLI(LightningCLI):
     def add_arguments_to_parser(self, parser) -> None:
-        # parser.link_arguments("model.context_model.model_name", "data.model_name")
-        parser.link_arguments("data.max_seq_len", "model.max_seq_len")
+        parser.link_arguments("model.checkpoint_path_or_name", "model.config.checkpoint", apply_on="instantiate")
+        # parser.link_arguments("model.config", "data.config", apply_on="instantiate")
+        parser.link_arguments("model.checkpoint_path_or_name", "data.config.checkpoint", apply_on="instantiate")
 
 
 def main() -> None:
     logger.info(f"PID: {os.getpid()}")
-    cli = CLI(ColbertPremiseRetriever, RetrievalDataModule)
+    cli = CLI(ColBERTPremiseRetrieverLightning, ColBERTDataModule, save_config_callback=None)
     logger.info("Configuration: \n", cli.config)
 
 

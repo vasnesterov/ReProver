@@ -1,0 +1,93 @@
+seed_everything: 3407  # https://arxiv.org/abs/2109.08203
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  strategy:
+    class_path: pytorch_lightning.strategies.DeepSpeedStrategy
+    init_args:
+      stage: 2
+      offload_optimizer: false
+      cpu_checkpointing: false
+  gradient_clip_val: 1.0
+  max_steps: 800000
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        verbose: true
+        save_top_k: 1
+        save_last: true
+        monitor: Recall@10_val
+        mode: max
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        monitor: Recall@10_val
+        patience: 5
+        mode: max
+        verbose: true
+
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: lean-colbert
+
+model:
+  index_name: colbert_v1
+  experiment_name: lean
+  checkpoint_path_or_name: "./checkpoints/colbertv2.0/"
+  collection: "./data/leandojo_benchmark_4/random/collection.tsv"
+  index_root: "./experiments/"
+  num_retrieved: 100
+  lr: 1e-7
+  warmup_steps: 20000
+  config:
+    index_bsize: 64
+    nbits: 1
+    kmeans_niters: 20
+    resume: false
+    similarity: cosine
+    relu: false
+    nway: 4
+    use_ib_negatives: true
+    drop_duplciate_passages: false
+    reranker: false
+    distillation_alpha: 1.0
+    ignore_scores: false
+    query_maxlen: 128
+    doc_maxlen: 180
+    attend_to_mask_tokens: false
+    interaction: colbert
+    dim: 128
+    mask_punctuation: true
+    overwrite: false
+
+data:
+  data_path: data/leandojo_benchmark_4/random/
+  corpus: data/leandojo_benchmark_4/corpus.jsonl
+  batch_size: 2
+  eval_batch_size: 4 # 128
+  max_seq_len: 128
+  num_workers: 4
+  config: ## COPY CONFIG FROM MODEL
+    index_bsize: 64
+    nbits: 1
+    kmeans_niters: 20
+    resume: false
+    similarity: cosine
+    relu: false
+    nway: 4
+    use_ib_negatives: true
+    drop_duplciate_passages: false
+    reranker: false
+    distillation_alpha: 1.0
+    ignore_scores: false
+    query_maxlen: 128
+    doc_maxlen: 180
+    attend_to_mask_tokens: false
+    interaction: colbert
+    dim: 128
+    mask_punctuation: true
+    overwrite: false

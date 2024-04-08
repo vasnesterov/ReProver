@@ -40,7 +40,7 @@ def setup_parser():
     parser.add_argument("--pretrained_checkpoint", type=Optional[Union[Path_fr, str]])
 
     parser.link_arguments(
-        "experiment_root", "colbert.root", compute_fn=lambda source: source.abs_path
+        "experiment_root", "colbert.root", compute_fn=lambda source: source.absolute
     )
 
     return parser
@@ -49,9 +49,9 @@ def setup_parser():
 def main(args):
     with Run().context(args.run):
         trainer = Trainer(
-            triples=args.data.triples_path.abs_path,
-            queries=args.data.queries_path.abs_path,
-            collection=args.data.collection_path.abs_path,
+            triples=args.data.triples_path.absolute,
+            queries=args.data.queries_path.absolute,
+            collection=args.data.collection_path.absolute,
             config=args.colbert,
             logger=args.logger,
         )
