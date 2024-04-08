@@ -28,6 +28,7 @@ trainer:
         patience: 5
         mode: max
         verbose: true
+  val_check_interval: 20000
 
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger

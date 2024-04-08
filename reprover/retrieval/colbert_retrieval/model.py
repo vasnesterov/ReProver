@@ -259,6 +259,8 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
 
             metrics["ib_loss"] = ib_loss
 
+        metrics["loss"] = loss
+
         return loss, metrics
 
     def training_step(self, batch) -> torch.Tensor:
@@ -324,12 +326,12 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
             if not first_match_found:
                 MRR.append(0.0)
 
-        self.logger.log_text("premises_val", columns=text_columns_to_log, data=text_to_log)
+        self.logger.log_text("val/premises", columns=text_columns_to_log, data=text_to_log)
         recall = [100 * np.mean(_) for _ in recall]
 
         for j in range(self.num_retrieved):
             self.log(
-                f"Recall@{j+1}_val",
+                f"val/Recall@{j+1}",
                 recall[j],
                 on_epoch=True,
                 sync_dist=True,
@@ -337,7 +339,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
             )
 
         self.log(
-            "MRR",
+            "val/MRR",
             np.mean(MRR),
             on_epoch=True,
             sync_dist=True,
