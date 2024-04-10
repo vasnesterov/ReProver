@@ -20,11 +20,11 @@ trainer:
         verbose: true
         save_top_k: 1
         save_last: true
-        monitor: Recall@10_val
+        monitor: val/Recall@10
         mode: max
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
-        monitor: Recall@10_val
+        monitor: val/Recall@10
         patience: 5
         mode: max
         verbose: true
@@ -38,7 +38,7 @@ trainer:
 model:
   index_name: colbert_v1
   experiment_name: lean
-  checkpoint_path_or_name: "./checkpoints/colbertv2.0/"
+  checkpoint_path_or_name: "microsoft/deberta-v3-xsmall"
   collection: "./data/leandojo_benchmark_4/random/collection.tsv"
   index_root: "./experiments/"
   num_retrieved: 100

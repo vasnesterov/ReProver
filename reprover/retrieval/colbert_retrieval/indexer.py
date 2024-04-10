@@ -27,7 +27,7 @@ class ColBERTIndexer(Indexer):
         self.verbose = verbose
         self.checkpoint = checkpoint
 
-        self.checkpoint_config = ColBERTConfig.load_from_checkpoint(checkpoint.name)
+        self.checkpoint_config = self.checkpoint.colbert_config
 
         self.config = ColBERTConfig.from_existing(
             self.checkpoint_config, config, Run().config
@@ -38,7 +38,8 @@ class ColBERTIndexer(Indexer):
         assert overwrite in [True, False, "reuse", "resume", "force_silent_overwrite"]
 
         self.configure(
-            collection=collection, index_name=name, resume=overwrite == "resume"
+            collection=collection, index_name=name, resume=overwrite == "resume",
+            triples=None, queries=None
         )
         # Note: The bsize value set here is ignored internally. Users are encouraged
         # to supply their own batch size for indexing by using the index_bsize parameter in the ColBERTConfig.
