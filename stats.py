@@ -1,15 +1,10 @@
 import subprocess
 import psutil
 
-def check_memory_threshold():
-    """Check if more than 90% RAM is used."""
-    mem = psutil.virtual_memory()
-    used_percent = mem.percent
-    if used_percent > 90:
-        print(f"Warning: More than 90% of RAM is used. Used: {used_percent}%")
-
 def check_process_by_substring(substring):
     for proc in psutil.process_iter(['pid', 'cmdline']):
+        if not proc.info['cmdline']:
+            continue
         if substring in ' '.join(proc.info['cmdline']):
             return True
     return False

@@ -28,20 +28,33 @@ def kill_lean_processes(lean_processes):
         print(f"Killing process {proc.pid} - {proc.info['cmdline']}")
         proc.kill()
 
+def kill_by_TL(lean_processes, tl):
+    old_processes = []
+    for proc in lean_processes:
+        if time.time() - proc.info['create_time'] > tl:  # 3600 seconds = 1 hour
+            old_processes.append(proc)
+    kill_lean_processes(old_processes)
+
 def has_enough_memory(threshold):
     mem = psutil.virtual_memory()
     used_percent = mem.percent
     return used_percent < threshold
 
+def has_enough_cpu(threshold):
+    cpu_percent = psutil.cpu_percent(interval=1, percpu=True)  # Get per-CPU utilization in the last 1 second
+    average_cpu_percent = sum(cpu_percent) / len(cpu_percent)
+    return average_cpu_percent < threshold
+
 def main(args):
     """Main function to run the script."""
     while True:
         time.sleep(args.timeout)
-        if has_enough_memory(args.memory_threshold):
+        if has_enough_memory(args.memory_threshold) and has_enough_cpu(args.cpu_threshold):
             continue
         lean_processes = get_lean_processes()
         if not lean_processes:
             continue
+        kill_by_TL(lean_processes, args.time_limit)
         goals = get_leandojo_goals(lean_processes)
         print(goals)
         print(len(goals))
@@ -54,7 +67,9 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Script description.")
     parser.add_argument("-t", "--timeout", type=int, default=5, help="Timeout in seconds")
+    parser.add_argument("-l", "--time_limit", type=int, default=900, help="Time limit in seconds")
     parser.add_argument("-n", "--n_ld", type=int, help="Number of Lean instances")
     parser.add_argument("-m", "--memory_threshold", type=int, help="Memory threshold in percent")
+    parser.add_argument("-c", "--cpu_threshold", type=int, help="CPU threshold in percent")
     args = parser.parse_args()
     main(args)
