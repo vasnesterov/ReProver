@@ -10,7 +10,7 @@ from colbert.infra.run import Run
 from colbert.searcher import Searcher
 
 # from lean_dojo import Pos
-from reprover.common import Context, Corpus, Premise, zip_strict
+from reprover.common import Context, Premise, zip_strict
 from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetrieverAPI
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
 from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
@@ -32,7 +32,6 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         num_retrieved: int = 100,
         verbose: int = 3,
         training: bool = False,
-        random_init: bool = False,
     ) -> None:
         super().__init__()
 
@@ -40,17 +39,18 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
             initial_config = ColBERTConfig.from_existing(config, Run().config)
 
             index_root = Path(index_root) / experiment_name / "indexes"
-            index_config = ColBERTConfig.load_from_index((index_root / index_name).as_posix())
-            index_root = index_root.as_posix()
 
+            # don't load index config if there is no index
+            index_path = index_root / index_name
+            if (index_path / "metadata.json").exists() or (index_path / "plan.json").exists():
+                index_config = ColBERTConfig.load_from_index(index_path.as_posix())
+            index_config = initial_config
+
+            index_root = index_root.as_posix()
             checkpoint = checkpoint_path_or_name or index_config.checkpoint
             checkpoint_config = ColBERTConfig.load_from_checkpoint(checkpoint)
             config = ColBERTConfig.from_existing(checkpoint_config, index_config, initial_config)
 
-            if random_init:
-                config.configure(checkpoint=None)
-            else:
-                config.configure(checkpoint=checkpoint)
             checkpoint = TrainingCheckpoint(checkpoint, colbert_config=config, verbose=verbose)
             self.searcher = TrainingSearcher(
                 index=index_name,
@@ -80,7 +80,6 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         )
         self.index_name = index_name
         self.num_retrieved = num_retrieved
-        self.corpus = None
 
     @property
     def embedding_size(self) -> int:
@@ -92,12 +91,9 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         # return super().load(ckpt_path, device, freeze)
         pass
 
-    def load_corpus(self, path_or_corpus: Union[str, Corpus]) -> None:
+    def load_corpus(self, path_or_corpus: str) -> None:
         """Associate the retriever with a corpus."""
-        if isinstance(path_or_corpus, Corpus):
-            self.corpus = path_or_corpus
-        else:
-            self.corpus = Corpus(path_or_corpus)
+        self.corpus = path_or_corpus
 
     def _encode_context(self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor) -> torch.FloatTensor:
         """Encode a context into a feature vector."""
@@ -123,6 +119,9 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         finally:
             self.searcher.configure(index_bsize=index_bsize)
 
+        if self.searcher.ranker is None:
+            self.searcher.init_ranker()
+
     def retrieve_from_preprocessed(self, batch):
         # context_emb = self._encode_context(batch["context_ids"], batch["context_mask"])
         if isinstance(batch, dict):
@@ -138,7 +137,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
                 filter_fn=None,
                 pids=None,
             )
-            retrieved_premises.append([self.corpus.all_premises[pid] for pid in pids])
+            retrieved_premises.append([self.search.collection[pid] for pid in pids])
             retrieved_scores.append(scores)
 
         return retrieved_premises, retrieved_scores
@@ -169,7 +168,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         retrieved_premises, retrieved_scores = [], []
         for i in range(len(contexts)):
             pids, ranks, scores = zip(*ranking.data[i])
-            retrieved_premises.append([self.corpus.all_premises[pid] for pid in pids])
+            retrieved_premises.append([self.searcher.collection[pid] for pid in pids])
             retrieved_scores.append(scores)
 
         return ranking, retrieved_premises, retrieved_scores

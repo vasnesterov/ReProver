@@ -11,7 +11,6 @@ from colbert.infra.config import ColBERTConfig
 from colbert.infra.config.config import ColBERTConfig
 from colbert.modeling.tokenization import DocTokenizer, QueryTokenizer, tensorize_triples
 from colbert.utils.utils import zipstar
-from reprover.common import Corpus
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -62,7 +61,6 @@ class ColBERTDataModule(pl.LightningDataModule):
         self,
         config: ColBERTConfig,
         data_path: str,
-        corpus: str,
         batch_size: int,
         eval_batch_size: int,
         max_seq_len: int,
@@ -76,7 +74,6 @@ class ColBERTDataModule(pl.LightningDataModule):
         self.max_seq_len = max_seq_len
         self.num_workers = num_workers
         self.config.configure(bsize=batch_size, query_maxlen=max_seq_len, doc_maxlen=max_seq_len)
-        self.corpus = Corpus(corpus)
 
     def prepare_data(self) -> None:
         pass

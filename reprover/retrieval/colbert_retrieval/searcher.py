@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 from typing import Union
 
 from colbert.data import Collection
@@ -31,8 +31,14 @@ class TrainingSearcher(Searcher):
 
         default_index_root = initial_config.index_root_
         index_root = index_root if index_root else default_index_root
-        self.index = os.path.join(index_root, index)
-        self.index_config = ColBERTConfig.load_from_index(self.index)
+        self.index = Path(index_root) / index
+
+        # don't load index config if there is no index
+        if (self.index / "metadata.json").exists() or (self.index / "plan.json").exists():
+            self.index_config = ColBERTConfig.load_from_index(self.index.as_posix())
+        else:
+            self.index_config = initial_config
+        self.index = self.index.as_posix()
 
         self.checkpoint = checkpoint
         self.config = ColBERTConfig.from_existing(self.checkpoint.colbert_config, self.index_config, initial_config)
@@ -46,4 +52,10 @@ class TrainingSearcher(Searcher):
         load_index_with_mmap = self.config.load_index_with_mmap
         if load_index_with_mmap and use_gpu:
             raise ValueError(f"Memory-mapped index can only be used with CPU!")
-        self.ranker = IndexScorer(self.index, use_gpu, load_index_with_mmap)
+
+        self.ranker = None
+        self.use_gpu = use_gpu
+        self.load_index_with_mmap = load_index_with_mmap
+
+    def init_ranker(self):
+        self.ranker = IndexScorer(self.index, self.use_gpu, self.load_index_with_mmap)

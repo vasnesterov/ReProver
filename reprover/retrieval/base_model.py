@@ -96,7 +96,8 @@ class BasePremiseRetriever(pl.LightningModule, PremiseRetrieverAPI):
             self.logger.log_hyperparams(self.hparams)
             logger.info(f"Logging to {self.trainer.log_dir}")
 
-        self.corpus = self.trainer.datamodule.corpus
+        if hasattr(self.trainer.datamodule, "corpus"):
+            self.corpus = self.trainer.datamodule.corpus
         self.corpus_embeddings = None
         self.embeddings_staled = True
 
@@ -183,7 +184,8 @@ class BasePremiseRetriever(pl.LightningModule, PremiseRetrieverAPI):
         )
 
     def on_predict_start(self) -> None:
-        self.corpus = self.trainer.datamodule.corpus
+        if hasattr(self.trainer.datamodule, "corpus"):
+            self.corpus = self.trainer.datamodule.corpus
         self.corpus_embeddings = None
         self.embeddings_staled = True
         self.reindex_corpus(self.trainer.datamodule.eval_batch_size)

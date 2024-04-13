@@ -67,7 +67,6 @@ model:
 
 data:
   data_path: data/leandojo_benchmark_4/random/
-  corpus: data/leandojo_benchmark_4/corpus.jsonl
   batch_size: 2
   eval_batch_size: 4 # 128
   max_seq_len: 128
