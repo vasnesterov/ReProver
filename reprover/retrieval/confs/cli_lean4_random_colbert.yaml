@@ -22,13 +22,7 @@ trainer:
         save_last: true
         monitor: val/Recall@10
         mode: max
-    - class_path: pytorch_lightning.callbacks.EarlyStopping
-      init_args:
-        monitor: val/Recall@10
-        patience: 5
-        mode: max
-        verbose: true
-  val_check_interval: 20000
+  check_val_every_n_epoch: 2
 
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
@@ -42,7 +36,7 @@ model:
   collection: "./data/leandojo_benchmark_4/random/collection.tsv"
   index_root: "./experiments/"
   num_retrieved: 100
-  lr: 1e-7
+  lr: 1e-5
   warmup_steps: 20000
   config:
     index_bsize: 64
@@ -51,7 +45,7 @@ model:
     resume: false
     similarity: cosine
     relu: false
-    nway: 4
+    nway: 16
     use_ib_negatives: true
     drop_duplciate_passages: false
     reranker: false
@@ -67,10 +61,10 @@ model:
 
 data:
   data_path: data/leandojo_benchmark_4/random/
-  batch_size: 2
-  eval_batch_size: 4 # 128
+  batch_size: 24
+  eval_batch_size: 24 # 128
   max_seq_len: 128
-  num_workers: 0
+  num_workers: 4
   config: ## COPY CONFIG FROM MODEL
     index_bsize: 64
     nbits: 1
@@ -78,7 +72,7 @@ data:
     resume: false
     similarity: cosine
     relu: false
-    nway: 4
+    nway: 16
     use_ib_negatives: true
     drop_duplciate_passages: false
     reranker: false

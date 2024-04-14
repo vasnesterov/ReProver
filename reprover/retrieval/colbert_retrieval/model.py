@@ -324,7 +324,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
             if not first_match_found:
                 MRR.append(0.0)
 
-        self.logger.log_text("val/premises", columns=text_columns_to_log, data=text_to_log)
+        self.logger.log_text(f"val/premises_epoch{self.current_epoch}", columns=text_columns_to_log, data=text_to_log)
         recall = [100 * np.mean(_) for _ in recall]
 
         for j in range(self.num_retrieved):
