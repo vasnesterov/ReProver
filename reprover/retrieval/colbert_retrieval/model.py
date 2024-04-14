@@ -35,18 +35,17 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
     ) -> None:
         super().__init__()
 
+        index_root = Path(index_root) / experiment_name / "indexes"
         if training:
             initial_config = ColBERTConfig.from_existing(config, Run().config)
 
-            index_root = Path(index_root) / experiment_name / "indexes"
-
             # don't load index config if there is no index
+
             index_path = index_root / index_name
             if (index_path / "metadata.json").exists() or (index_path / "plan.json").exists():
                 index_config = ColBERTConfig.load_from_index(index_path.as_posix())
             index_config = initial_config
 
-            index_root = index_root.as_posix()
             checkpoint = checkpoint_path_or_name or index_config.checkpoint
             checkpoint_config = ColBERTConfig.load_from_checkpoint(checkpoint)
             config = ColBERTConfig.from_existing(checkpoint_config, index_config, initial_config)
@@ -57,7 +56,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
                 checkpoint=checkpoint,
                 collection=collection,
                 config=config,
-                index_root=index_root,
+                index_root=index_root.as_posix(),
                 verbose=verbose,
             )
         else:
@@ -66,7 +65,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
                 checkpoint=checkpoint_path_or_name,
                 collection=collection,
                 config=config,
-                index_root=Path(index_root) / experiment_name / "indexes",
+                index_root=index_root.as_posix(),
                 verbose=verbose,
             )
 
@@ -75,7 +74,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
 
         self.indexer = ColBERTIndexer(self.checkpoint)
         self.indexer.configure(
-            root=index_root,
+            root=index_root.parent.parent.as_posix(),
             experiment=experiment_name,
         )
         self.index_name = index_name
@@ -137,7 +136,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
                 filter_fn=None,
                 pids=None,
             )
-            retrieved_premises.append([self.search.collection[pid] for pid in pids])
+            retrieved_premises.append([self.searcher.collection[pid] for pid in pids])
             retrieved_scores.append(scores)
 
         return retrieved_premises, retrieved_scores
@@ -278,6 +277,8 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
     def on_validation_start(self) -> None:
         if not self.debug:
             self.reindex_corpus(self.trainer.datamodule.eval_batch_size)
+        else:
+            self.searcher.init_ranker()
 
     def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> None:
         """Retrieve premises and calculate metrics such as Recall@K and MRR."""

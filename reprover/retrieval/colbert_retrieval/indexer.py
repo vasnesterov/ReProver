@@ -29,18 +29,14 @@ class ColBERTIndexer(Indexer):
 
         self.checkpoint_config = self.checkpoint.colbert_config
 
-        self.config = ColBERTConfig.from_existing(
-            self.checkpoint_config, config, Run().config
-        )
+        self.config = ColBERTConfig.from_existing(self.checkpoint_config, config, Run().config)
         self.configure(checkpoint=checkpoint.name)
 
     def index(self, name, collection, overwrite=False):
         assert overwrite in [True, False, "reuse", "resume", "force_silent_overwrite"]
 
-        self.configure(
-            collection=collection, index_name=name, resume=overwrite == "resume",
-            triples=None, queries=None
-        )
+        self.configure(collection=collection, index_name=name, resume=overwrite == "resume", triples=None, queries=None)
+
         # Note: The bsize value set here is ignored internally. Users are encouraged
         # to supply their own batch size for indexing by using the index_bsize parameter in the ColBERTConfig.
         self.configure(bsize=64, partitions=None)
@@ -76,9 +72,7 @@ class CollectionIndexerFromCheckpoint(CollectionIndexer):
     stores the index on the disk in chunks.
     """
 
-    def __init__(
-        self, checkpoint: Checkpoint, config: ColBERTConfig, collection, verbose=2
-    ) -> None:
+    def __init__(self, checkpoint: Checkpoint, config: ColBERTConfig, collection, verbose=2) -> None:
         self.verbose = verbose
         self.config = config
         self.rank, self.nranks = self.config.rank, self.config.nranks
