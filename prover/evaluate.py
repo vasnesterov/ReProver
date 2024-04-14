@@ -146,6 +146,7 @@ def _get_theorems_tactics_from_files(
         theorems = theorems[:num_theorems]
         positions = positions[:num_theorems]
         tactics = tactics[:num_theorems]
+    
     logger.info(f"{len(theorems)} theorems loaded from {data_path}")
 
     metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
@@ -168,6 +169,7 @@ def evaluate(
     num_sampled_tactics: int = 64,
     timeout: int = 600,
     num_cpus: int = 1,
+    stop_if_found: bool = True,
     with_gpus: bool = False,
     verbose: bool = False,
     use_RMT: bool = False,
@@ -190,6 +192,7 @@ def evaluate(
         timeout=timeout,
         num_sampled_tactics=num_sampled_tactics,
         debug=verbose,
+        stop_if_found=stop_if_found,
         use_RMT=use_RMT,
         shared_gpu=shared_gpu,
     )
@@ -275,6 +278,9 @@ def main() -> None:
         "--num-cpus", type=int, default=1, help="The number of concurrent provers."
     )
     parser.add_argument(
+        "--continue-when-proved", action="store_true", help="Continue searching when found a proof."
+    )
+    parser.add_argument(
         "--with-gpus", action="store_true", help="Use GPUs for proof search."
     )
     parser.add_argument(
@@ -309,6 +315,7 @@ def main() -> None:
         args.tactic,
         args.module,
         num_cpus=args.num_cpus,
+        stop_if_found=not args.continue_when_proved,
         with_gpus=args.with_gpus,
         timeout=args.timeout,
         num_sampled_tactics=args.num_sampled_tactics,

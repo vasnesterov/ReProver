@@ -40,6 +40,7 @@ class SearchResult:
     proof: Optional[List[str]]
 
     # Some statistics during proof search.
+    tree: Node
     actor_time: float
     environment_time: float
     total_time: float
@@ -55,10 +56,12 @@ class BestFirstSearchProver:
         timeout: int,
         num_sampled_tactics: int,
         debug: bool,
+        stop_if_found: bool = True,
     ) -> None:
         self.tac_gen = tac_gen
         self.timeout = timeout
         self.num_sampled_tactics = num_sampled_tactics
+        self.stop_if_found = stop_if_found
         self.debug = debug
 
         self.num_expansions = 0
@@ -99,8 +102,9 @@ class BestFirstSearchProver:
                 with torch.no_grad():
                     try:
                         self._best_first_search()
-                    except DojoCrashError:
+                    except DojoCrashError as ex:
                         logger.warning(f"Dojo crashed when proving {thm}")
+                        logger.warning(ex)
                         pass
 
             if self.root.status == Status.PROVED:
@@ -112,6 +116,7 @@ class BestFirstSearchProver:
                 theorem=thm,
                 status=self.root.status,
                 proof=proof,
+                tree=self.root,
                 actor_time=self.actor_time,
                 environment_time=self.environment_time,
                 total_time=self.total_time,
@@ -142,7 +147,8 @@ class BestFirstSearchProver:
             if self.total_time > self.timeout:
                 if self.root.status == Status.PROVED:
                     logger.info("Found a proof but timed out.")
-                self.root.status = Status.OPEN
+                if self.stop_if_found:
+                    self.root.status = Status.OPEN
                 logger.info("Search timed out.")
                 break
 
@@ -152,7 +158,12 @@ class BestFirstSearchProver:
 
             if self.root.status == Status.PROVED:
                 logger.info("Found a proof!")
-                break
+                if self.stop_if_found:
+                    break
+                else:
+                    self.root.status = Status.OPEN
+        if not self.stop_if_found and self.root.distance_to_proof < 1000:
+            self.root.status = Status.PROVED
 
     def _step(self):
         """
@@ -276,7 +287,8 @@ class BestFirstSearchProver:
             if isinstance(response, ProofFinished):
                 assert isinstance(node, ProofFinishedNode)
                 assert node not in self.priority_queue
-                assert self.root.status == Status.PROVED
+                if self.stop_if_found:
+                    assert self.root.status == Status.PROVED
             elif type(response) in (
                 LeanError,
                 TimeoutError,
@@ -360,6 +372,7 @@ class GpuProver(BestFirstSearchProver):
             timeout,
             num_sampled_tactics,
             debug,
+            stop_if_found,
         )
 
 @ray.remote(num_gpus=1)
@@ -407,7 +420,7 @@ class AsyncGpuScheduler:
         while True:
             if len(self.queue) == 0:
                 logger.debug("GPU is waiting")
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
                 continue
             args, kwargs, out_future = self.queue.pop(0)
             output = await self.gpu_proxy.generate.remote(*args, **kwargs)
@@ -430,6 +443,7 @@ class AsyncGpuProver(BestFirstSearchProver):
         tac_gen: AsyncGpuScheduler,
         timeout: int,
         num_sampled_tactics: int,
+        stop_if_found: bool,
         debug: bool,
         use_RMT=False,
     ) -> None:
@@ -440,6 +454,7 @@ class AsyncGpuProver(BestFirstSearchProver):
             timeout,
             num_sampled_tactics,
             debug,
+            stop_if_found,
         )
 
 class DistributedProver:
@@ -456,6 +471,7 @@ class DistributedProver:
         tactic: Optional[str],
         module: Optional[str],
         num_cpus: int,
+        stop_if_found: bool,
         with_gpus: bool,
         timeout: int,
         num_sampled_tactics: int,
@@ -487,6 +503,9 @@ class DistributedProver:
             )
             return
 
+        if not stop_if_found:
+            assert shared_gpu, "Not implemented. Lazy :("
+        
         ray.init(num_cpus=num_cpus * 2)
         if with_gpus:
             logger.info(f"Launching {num_cpus} GPU workers.")
@@ -523,6 +542,7 @@ class DistributedProver:
                         timeout=timeout,
                         num_sampled_tactics=num_sampled_tactics,
                         debug=debug,
+                        stop_if_found=stop_if_found,
                         use_RMT=use_RMT,
                     )
                     for _ in range(num_cpus)
