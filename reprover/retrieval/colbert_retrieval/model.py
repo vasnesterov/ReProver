@@ -15,7 +15,6 @@ from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetriever
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
 from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
 from reprover.retrieval.colbert_retrieval.searcher import TrainingSearcher
-from tqdm import tqdm
 
 torch.set_float32_matmul_precision("medium")
 
@@ -129,7 +128,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
             Q, D, s = batch
         context_emb = self._encode_context(*Q)
         retrieved_premises, retrieved_scores = [], []
-        for query_idx in tqdm(range(len(context_emb))):
+        for query_idx in range(len(context_emb)):
             pids, ranks, scores = self.searcher.dense_search(
                 context_emb[query_idx : query_idx + 1],
                 self.num_retrieved,
@@ -186,6 +185,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         lr: float = 1e-5,
         warmup_steps: int = 20000,
         verbose: int = 3,
+        n_log_premises: int = None,
         debug: bool = False,
     ) -> None:
         BasePremiseRetriever.__init__(self)
@@ -207,6 +207,10 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         self.config.configure(lr=self.lr, warmup=self.warmup_steps)
         self.checkpoint_path_or_name = checkpoint_path_or_name
         self.debug = debug
+        if n_log_premises is None:
+            self.n_log_premises = num_retrieved
+        else:
+            self.n_log_premises = n_log_premises
 
     @classmethod
     def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":
@@ -289,26 +293,20 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         recall = [[] for _ in range(self.num_retrieved)]
         MRR = []
         num_with_premises = 0
-        tb = self.logger.experiment
         text_columns_to_log = ["ground truth", "retrieved", f"Recall@{self.num_retrieved}"]
         text_to_log = []
 
-        # for i, (all_pos_premises, premises) in enumerate(zip_strict(batch["all_pos_premises"], retrieved_premises)):
         for i, (all_pos_premises, premises) in enumerate(zip_strict(batch["positive_passages"], retrieved_premises)):
             # Only log the first example in the batch.
             if i == 0:
-                # msg_gt = "\n\n".join([p.serialize() for p in all_pos_premises])
-                # msg_retrieved = "\n\n".join([f"{j}. {p.serialize()}" for j, p in enumerate(premises)])
                 msg_gt = all_pos_premises
-                msg_retrieved = "\n\n".join([f"{j}. {p.serialize()}" for j, p in enumerate(premises)])
+                msg_retrieved = "\n\n".join([f"{j}. {p}" for j, p in enumerate(premises[: self.n_log_premises])])
                 TP = len(set(premises).intersection(all_pos_premises))
                 if len(all_pos_premises) == 0:
                     r = math.nan
                 else:
                     r = float(TP) / len(all_pos_premises)
-                msg = f"Recall@{self.num_retrieved}: {r}\n\nGround truth:\n\n```\n{msg_gt}\n```\n\nRetrieved:\n\n```\n{msg_retrieved}\n```"
                 text_to_log.append([msg_gt, msg_retrieved, f"{r:.3f}"])
-                # self.logger.log_text.add_text(f"premises_val", msg, self.global_step)
 
             all_pos_premises = set(all_pos_premises)
             if len(all_pos_premises) == 0:
