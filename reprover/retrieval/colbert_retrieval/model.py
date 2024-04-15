@@ -290,7 +290,8 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         retrieved_premises, _ = self.retrieve_from_preprocessed(batch)
 
         # Evaluation & logging.
-        recall = [[] for _ in range(self.num_retrieved)]
+        recall_ats = [1, 10, self.num_retrieved] # k-s to report Recall@k
+        recall = [[] for _ in recall_ats]
         MRR = []
         num_with_premises = 0
         text_columns_to_log = ["ground truth", "retrieved", f"Recall@{self.num_retrieved}"]
@@ -315,11 +316,11 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
                 num_with_premises += 1
             first_match_found = False
 
-            for j in range(self.num_retrieved):
-                TP = len(all_pos_premises.intersection(premises[: (j + 1)]))
+            for j, recall_at in enumerate(recall_ats):
+                TP = len(all_pos_premises.intersection(premises[:recall_at]))
                 recall[j].append(float(TP) / len(all_pos_premises))
-                if premises[j] in all_pos_premises and not first_match_found:
-                    MRR.append(1.0 / (j + 1))
+                if premises[recall_at - 1] in all_pos_premises and not first_match_found:
+                    MRR.append(1.0 / recall_at)
                     first_match_found = True
             if not first_match_found:
                 MRR.append(0.0)
@@ -327,10 +328,10 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         self.logger.log_text(f"val/premises_epoch{self.current_epoch}", columns=text_columns_to_log, data=text_to_log)
         recall = [100 * np.mean(_) for _ in recall]
 
-        for j in range(self.num_retrieved):
+        for recall_at, recall_val in zip_strict(recall_ats, recall):
             self.log(
-                f"val/Recall@{j+1}",
-                recall[j],
+                f"val/Recall@{recall_at}",
+                recall_val,
                 on_epoch=True,
                 sync_dist=True,
                 batch_size=num_with_premises,
