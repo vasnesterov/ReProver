@@ -13,7 +13,7 @@ trainer:
   max_steps: 800000
   callbacks:
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
-      init_args: 
+      init_args:
         logging_interval: step
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
@@ -25,7 +25,7 @@ trainer:
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         monitor: Recall@10_val
-        patience: 5
+        patience: 100
         mode: max
         verbose: true
 
@@ -34,6 +34,7 @@ model:
   lr: 2e-4
   warmup_steps: 2000
   num_retrieved: 100
+  n_log_premises: 10
 
 data:
   data_path: data/leandojo_benchmark_4/novel_premises/
