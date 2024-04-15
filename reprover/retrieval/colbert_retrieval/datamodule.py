@@ -80,7 +80,7 @@ class ColBERTDataModule(pl.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None) -> None:
         collection = self.data_path / "collection.tsv"
-        if stage in (None, "fit"):
+        if stage in (None, "fit", "validate"):
             self.ds_train = ColBERTDataset(
                 self.config, self.data_path / "triples_train.json", self.data_path / "queries_train.json", collection
             )
