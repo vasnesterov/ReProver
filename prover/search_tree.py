@@ -239,12 +239,12 @@ class InternalNode(Node):
             assert all(edge.dst.status == Status.FAILED for edge in self.out_edges)
             assert self.distance_to_proof == math.inf
             assert self.extract_proof() == None
-        # elif self.status == Status.OPEN: delete me!!!
-        #     assert self.out_edges
-        #     assert not any(edge.dst.status == Status.PROVED for edge in self.out_edges) 
-        #     assert not all(edge.dst.status == Status.FAILED for edge in self.out_edges)
-        #     assert self.distance_to_proof == math.inf
-        #     assert self.extract_proof() == None
+        elif self.status == Status.OPEN:
+            assert self.out_edges
+            assert not any(edge.dst.status == Status.PROVED for edge in self.out_edges) 
+            assert not all(edge.dst.status == Status.FAILED for edge in self.out_edges)
+            assert self.distance_to_proof == math.inf
+            assert self.extract_proof() == None
 
 
 @dataclass

@@ -63,6 +63,8 @@ class BestFirstSearchProver:
         self.num_sampled_tactics = num_sampled_tactics
         self.stop_if_found = stop_if_found
         self.debug = debug
+        if not self.stop_if_found:
+            self.debug = False # hack
 
         self.num_expansions = 0
         self.actor_time = 0.0
