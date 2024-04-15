@@ -9,7 +9,8 @@ from colbert.data.examples import Examples
 from colbert.data.queries import Queries
 from colbert.infra.config import ColBERTConfig
 from colbert.infra.config.config import ColBERTConfig
-from colbert.modeling.tokenization import DocTokenizer, QueryTokenizer, tensorize_triples
+from colbert.modeling.tokenization import (DocTokenizer, QueryTokenizer,
+                                           tensorize_triples)
 from colbert.utils.utils import zipstar
 from torch.utils.data import DataLoader, Dataset
 
@@ -47,7 +48,7 @@ class ColBERTDataset(Dataset):
     def collate(self, inputs):
         queries, passages, scores = zip(*inputs)
 
-        positive_passages = [p[0] for p in passages]
+        positive_passages = [[p[0]] for p in passages]
         bsize = len(queries)
         passages = list(chain(*passages))
 
