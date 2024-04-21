@@ -19,43 +19,19 @@ from prover.proof_search_fast import SearchResult
 class RankerDataset(Dataset):
     def __init__(
         self,
-        pickle_path: str,
+        json_path: str,
         max_seq_len: int,
         tokenizer
     ) -> None:
         super().__init__()
-        self.pickle_path = pickle_path
+        self.json_path = json_path
         self.max_seq_len = max_seq_len
         self.tokenizer = tokenizer
         self.data = self._load_data()
-
-    def _extract_states_with_distances_from_tree(self, root, seen=None):
-        if seen is None:
-            seen = set()
-        if root.state in seen:
-            return []
-        seen.add(root.state)
-        ans = [{
-            'state': root.state.pp,
-            'target': 1 / root.distance_to_proof
-        }]
-        if root.is_explored:
-            for edge in root.out_edges:
-                if isinstance(edge.dst, InternalNode):
-                    ans += self._extract_states_with_distances_from_tree(edge.dst, seen)
-        return ans
-
-    def _extract_states_with_distances(self, search_data):
-        ans = []
-        for result in tqdm(search_data):
-            if isinstance(result, SearchResult):
-                ans += self._extract_states_with_distances_from_tree(result.tree)
-        return ans
     
     def _load_data(self):
-        with open(self.pickle_path, 'rb') as f:
-            search_data = pickle.load(f)
-        data = self._extract_states_with_distances(search_data)
+        with open(self.json_path, 'r') as f:
+            data = json.load(f)
         logger.info(f"{len(data)} examples loaded")
         return data
 
@@ -110,14 +86,14 @@ class RankerDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         if stage in (None, "fit"):
             self.ds_train = RankerDataset(
-                os.path.join(self.data_path, "train.pickle"),
+                os.path.join(self.data_path, "train.json"),
                 self.max_seq_len,
                 self.tokenizer,
             )
 
         if stage in (None, "fit", "validate"):
             self.ds_val = RankerDataset(
-                os.path.join(self.data_path, "val.pickle"),
+                os.path.join(self.data_path, "val.json"),
                 self.max_seq_len,
                 self.tokenizer,
             )
