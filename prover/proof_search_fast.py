@@ -256,7 +256,7 @@ class BestFirstSearchProver:
                 assert isinstance(response, TacticState)
                 result_node = InternalNode(
                     state=response,
-                    cumulative_logprob=logprob + node.cumulative_logprob,
+                    cumulative_logprob= -1 + node.cumulative_logprob,
                 )
 
             if result_node.status == Status.OPEN:  # Don't search proved/failed nodes
