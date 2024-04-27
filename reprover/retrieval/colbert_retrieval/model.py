@@ -8,10 +8,10 @@ from colbert.data import Collection
 from colbert.infra.config import ColBERTConfig
 from colbert.infra.run import Run
 from colbert.searcher import Searcher
-
 # from lean_dojo import Pos
 from reprover.common import Context, Premise, zip_strict
-from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetrieverAPI
+from reprover.retrieval.base_model import (BasePremiseRetriever,
+                                           PremiseRetrieverAPI)
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
 from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
 from reprover.retrieval.colbert_retrieval.searcher import TrainingSearcher
@@ -211,6 +211,8 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
             self.n_log_premises = num_retrieved
         else:
             self.n_log_premises = n_log_premises
+
+        print(self.checkpoint)
 
     @classmethod
     def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":
