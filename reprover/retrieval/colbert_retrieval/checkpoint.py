@@ -16,6 +16,9 @@ class TrainingCheckpoint(ColBERT):
         self.doc_tokenizer = DocTokenizer(self.colbert_config)
 
         assert len(self.query_tokenizer.tok) == len(self.doc_tokenizer.tok)
+        assert self.query_tokenizer.tok.mask_token is not None
+        assert colbert_config.query_token in self.query_tokenizer.tok.get_vocab()
+        assert colbert_config.doc_token in self.doc_tokenizer.tok.get_vocab()
 
         doc_token_id_query = self.query_tokenizer.tok.convert_tokens_to_ids(self.colbert_config.doc_token)
         doc_token_id_doc = self.doc_tokenizer.tok.convert_tokens_to_ids(self.colbert_config.doc_token)
