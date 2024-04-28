@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import tqdm
 from jsonargparse import ArgumentParser
-from jsonargparse.typing import Path_drw, Path_fc, Path_fr
+from jsonargparse.typing import Path_drw, Path_fr
 from reprover.common import Context, Corpus, Premise
 from reprover.retrieval.datamodule import RetrievalDataset
 
