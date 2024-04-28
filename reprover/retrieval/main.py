@@ -14,16 +14,13 @@ from reprover.retrieval.colbert_retrieval.model import \
 
 class CLI(LightningCLI):
     def add_arguments_to_parser(self, parser) -> None:
-        parser.link_arguments("model.checkpoint_path_or_name", "model.config.checkpoint", apply_on="instantiate")
-        parser.link_arguments("model.checkpoint_path_or_name", "data.config.checkpoint", apply_on="instantiate")
 
         cfg = ColBERTConfig()
         for f in fields(cfg):
-            if f.name != 'checkpoint':
-                parser.link_arguments(
-                    f"model.config.{f.name}",
-                    f"data.config.{f.name}",
-                )
+            parser.link_arguments(
+                f"model.config.{f.name}",
+                f"data.config.{f.name}",
+            )
 
 
 def main() -> None:

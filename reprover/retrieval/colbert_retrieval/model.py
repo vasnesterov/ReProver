@@ -1,14 +1,10 @@
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from colbert.data import Collection
 from colbert.infra.config import ColBERTConfig
-from colbert.infra.run import Run
-from colbert.searcher import Searcher
-# from lean_dojo import Pos
 from reprover.common import Context, Premise, zip_strict
 from reprover.retrieval.base_model import (BasePremiseRetriever,
                                            PremiseRetrieverAPI)
@@ -22,61 +18,40 @@ torch.set_float32_matmul_precision("medium")
 class ColBERTPremiseRetriever(PremiseRetrieverAPI):
     def __init__(
         self,
-        index_name: str,
-        experiment_name: str,
-        checkpoint_path_or_name: Optional[str] = None,
-        collection: Optional[Union[str, Collection]] = None,
-        config: Optional[Union[str, ColBERTConfig]] = None,
-        index_root: Optional[str] = None,
+        config: ColBERTConfig,
         num_retrieved: int = 100,
         verbose: int = 3,
-        training: bool = False,
     ) -> None:
         super().__init__()
 
-        index_root = Path(index_root) / experiment_name / "indexes"
-        if training:
-            initial_config = ColBERTConfig.from_existing(config, Run().config)
+        index_root = Path(config.index_root_)
 
-            # don't load index config if there is no index
+        # don't load index config if there is no index
+        index_path = index_root / config.index_name
+        if (index_path / "metadata.json").exists() or (index_path / "plan.json").exists():
+            index_config = ColBERTConfig.load_from_index(index_path.as_posix())
+        index_config = config
 
-            index_path = index_root / index_name
-            if (index_path / "metadata.json").exists() or (index_path / "plan.json").exists():
-                index_config = ColBERTConfig.load_from_index(index_path.as_posix())
-            index_config = initial_config
+        checkpoint_config = ColBERTConfig.load_from_checkpoint(config.checkpoint)
+        colbert_config = ColBERTConfig.from_existing(checkpoint_config, index_config, config)
 
-            checkpoint = checkpoint_path_or_name or index_config.checkpoint
-            checkpoint_config = ColBERTConfig.load_from_checkpoint(checkpoint)
-            config = ColBERTConfig.from_existing(checkpoint_config, index_config, initial_config)
+        checkpoint = TrainingCheckpoint(config.checkpoint, colbert_config=colbert_config, verbose=verbose)
 
-            checkpoint = TrainingCheckpoint(checkpoint, colbert_config=config, verbose=verbose)
-            self.searcher = TrainingSearcher(
-                index=index_name,
-                checkpoint=checkpoint,
-                collection=collection,
-                config=config,
-                index_root=index_root.as_posix(),
-                verbose=verbose,
-            )
-        else:
-            self.searcher = Searcher(
-                index=index_name,
-                checkpoint=checkpoint_path_or_name,
-                collection=collection,
-                config=config,
-                index_root=index_root.as_posix(),
-                verbose=verbose,
-            )
+        self.searcher = TrainingSearcher(
+            checkpoint=checkpoint,
+            config=checkpoint.colbert_config,
+            verbose=verbose,
+        )
 
         self.checkpoint = self.searcher.checkpoint
         self.config = self.searcher.config
 
-        self.indexer = ColBERTIndexer(self.checkpoint)
+        self.indexer = ColBERTIndexer(self.checkpoint, config=self.config)
         self.indexer.configure(
             root=index_root.parent.parent.as_posix(),
-            experiment=experiment_name,
+            experiment=colbert_config.experiment,
         )
-        self.index_name = index_name
+        self.index_name = colbert_config.index_name
         self.num_retrieved = num_retrieved
 
     @property
@@ -108,14 +83,16 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         return self.checkpoint.doc(input_ids, attention_mask, keep_dims=keep_dims, to_cpu=to_cpu)
 
     @torch.no_grad()
-    def reindex_corpus(self, batch_size: int) -> None:
+    def reindex_corpus(self, batch_size: Optional[int] = None) -> None:
         """Re-index the retrieval corpus using the up-to-date encoder."""
-        index_bsize = self.config.index_bsize
+        old_index_bsize = self.config.index_bsize
+        if batch_size is None:
+            batch_size = old_index_bsize
         try:
             self.indexer.configure(index_bsize=batch_size)
             self.indexer.index(self.index_name, collection=self.searcher.collection, overwrite=True)
         finally:
-            self.searcher.configure(index_bsize=index_bsize)
+            self.searcher.configure(index_bsize=old_index_bsize)
 
         if self.searcher.ranker is None:
             self.searcher.init_ranker()
@@ -147,7 +124,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         theorem_full_name: List[str],
         theorem_pos: List["Pos"],
         k: int,
-        reindex_batch_size: int = 32,
+        reindex_batch_size: int = None,
         do_reindex: bool = True,
     ) -> Tuple[List[Premise], List[float]]:
         """Retrieve ``k`` premises from ``corpus`` using ``state`` and ``tactic_prefix`` as context."""
@@ -176,11 +153,6 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
     def __init__(
         self,
         config: ColBERTConfig,
-        index_name: str,
-        experiment_name: str,
-        checkpoint_path_or_name: str = None,
-        collection: str = None,
-        index_root: str = None,
         num_retrieved: int = 100,
         lr: float = 1e-5,
         warmup_steps: int = 20000,
@@ -192,20 +164,13 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         # self.save_hyperparameters()
         ColBERTPremiseRetriever.__init__(
             self,
-            index_name=index_name,
-            experiment_name=experiment_name,
-            checkpoint_path_or_name=checkpoint_path_or_name,
-            collection=collection,
             config=config,
-            index_root=index_root,
             num_retrieved=num_retrieved,
             verbose=verbose,
-            training=True,
         )
         self.lr = lr
         self.warmup_steps = warmup_steps
         self.config.configure(lr=self.lr, warmup=self.warmup_steps)
-        self.checkpoint_path_or_name = checkpoint_path_or_name
         self.debug = debug
         if n_log_premises is None:
             self.n_log_premises = num_retrieved

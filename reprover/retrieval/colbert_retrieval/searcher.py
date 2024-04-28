@@ -3,7 +3,7 @@ from typing import Union
 
 from colbert.data import Collection
 from colbert.infra.config import ColBERTConfig
-from colbert.infra.run import Run
+from colbert.infra.config.utils import copy_essential_config
 from colbert.modeling.checkpoint import Checkpoint
 from colbert.search.index_storage import IndexScorer
 from colbert.searcher import Searcher
@@ -18,32 +18,20 @@ class TrainingSearcher(Searcher):
 
     def __init__(
         self,
-        index,
         checkpoint: Union[TrainingCheckpoint, Checkpoint],
-        collection=None,
-        config=None,
-        index_root=None,
+        config: ColBERTConfig,
         verbose: int = 3,
     ):
         self.verbose = verbose
 
-        initial_config = ColBERTConfig.from_existing(config, Run().config)
-
-        default_index_root = initial_config.index_root_
-        index_root = index_root if index_root else default_index_root
-        self.index = Path(index_root) / index
-
-        # don't load index config if there is no index
-        if (self.index / "metadata.json").exists() or (self.index / "plan.json").exists():
-            self.index_config = ColBERTConfig.load_from_index(self.index.as_posix())
-        else:
-            self.index_config = initial_config
+        self.index = Path(config.index_root_) / config.index_name
         self.index = self.index.as_posix()
 
         self.checkpoint = checkpoint
-        self.config = ColBERTConfig.from_existing(self.checkpoint.colbert_config, self.index_config, initial_config)
+        self.config = ColBERTConfig.from_existing(self.checkpoint.colbert_config, config)
+        copy_essential_config(config, self.config)
 
-        self.collection = Collection.cast(collection or self.config.collection)
+        self.collection = Collection.cast(self.config.collection)
         self.configure(checkpoint=self.checkpoint.name, collection=self.collection)
 
         use_gpu = self.config.total_visible_gpus > 0

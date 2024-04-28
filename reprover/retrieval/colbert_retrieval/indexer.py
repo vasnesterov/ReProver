@@ -7,8 +7,8 @@ from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.indexing.collection_indexer import CollectionIndexer
 from colbert.indexing.index_saver import IndexSaver
 from colbert.infra.config import ColBERTConfig
+from colbert.infra.config.utils import copy_essential_config
 from colbert.infra.launcher import print_memory_stats
-from colbert.infra.run import Run
 from colbert.modeling.checkpoint import Checkpoint
 from colbert.utils.utils import create_directory
 
@@ -29,7 +29,9 @@ class ColBERTIndexer(Indexer):
 
         self.checkpoint_config = self.checkpoint.colbert_config
 
-        self.config = ColBERTConfig.from_existing(self.checkpoint_config, config, Run().config)
+        self.config = ColBERTConfig.from_existing(self.checkpoint_config, config)
+        copy_essential_config(config, self.config)
+
         self.configure(checkpoint=checkpoint.name)
 
     def index(self, name, collection, overwrite=False):

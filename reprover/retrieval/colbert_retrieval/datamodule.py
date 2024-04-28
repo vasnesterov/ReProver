@@ -64,7 +64,6 @@ class ColBERTDataModule(pl.LightningDataModule):
         data_path: str,
         batch_size: int,
         eval_batch_size: int,
-        max_seq_len: int,
         num_workers: int,
     ) -> None:
         super().__init__()
@@ -72,9 +71,8 @@ class ColBERTDataModule(pl.LightningDataModule):
         self.data_path = Path(data_path)
         self.batch_size = batch_size
         self.eval_batch_size = eval_batch_size
-        self.max_seq_len = max_seq_len
         self.num_workers = num_workers
-        self.config.configure(bsize=batch_size, query_maxlen=max_seq_len, doc_maxlen=max_seq_len)
+        self.config.configure(bsize=batch_size)
 
     def prepare_data(self) -> None:
         pass

@@ -30,15 +30,15 @@ trainer:
       project: lean-colbert
 
 model:
-  num_retrieved: 100
+  num_retrieved: 20
   lr: 1e-5
   warmup_steps: 20000
   config:
     checkpoint: microsoft/deberta-v3-xsmall
-    collection: ./data/leandojo_benchmark_4/random/collection.tsv
-    index_name: colbert_v1
-    experiment: lean
-    root: "./experiments/"
+    collection: ./data/msmarco/collection.tsv
+    index_name: msmarco
+    experiment: msmarco
+    root: ./experiments/
 
     nbits: 1
     kmeans_niters: 20
@@ -60,7 +60,7 @@ model:
     overwrite: false
 
 data:
-  data_path: data/leandojo_benchmark_4/random/
-  batch_size: 24  # training batch size
-  eval_batch_size: 24 # the batch size will be used for corpus reindexing
+  data_path: data/msmarco
+  batch_size: 24
+  eval_batch_size: 128 # 128
   num_workers: 4
