@@ -13,18 +13,11 @@ from colbert.infra.config import ColBERTConfig
 from colbert.modeling.tokenization import DocTokenizer, QueryTokenizer
 from lean_dojo import LeanGitRepo, Pos
 from loguru import logger
+from reprover.common import (Batch, Context, Corpus, Example, format_state,
+                             get_all_pos_premises)
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer
-
-from reprover.common import (
-    Batch,
-    Context,
-    Corpus,
-    Example,
-    format_state,
-    get_all_pos_premises,
-)
 
 
 class RetrievalDataset(Dataset):

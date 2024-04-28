@@ -39,7 +39,7 @@ model:
   lr: 1e-5
   warmup_steps: 20000
   config:
-    index_bsize: 64
+    index_bsize: 128
     nbits: 1
     kmeans_niters: 20
     resume: false
@@ -65,23 +65,3 @@ data:
   eval_batch_size: 24 # 128
   max_seq_len: 128
   num_workers: 4
-  config: ## COPY CONFIG FROM MODEL
-    index_bsize: 64
-    nbits: 1
-    kmeans_niters: 20
-    resume: false
-    similarity: cosine
-    relu: false
-    nway: 16
-    use_ib_negatives: true
-    drop_duplciate_passages: false
-    reranker: false
-    distillation_alpha: 1.0
-    ignore_scores: false
-    query_maxlen: 128
-    doc_maxlen: 180
-    attend_to_mask_tokens: false
-    interaction: colbert
-    dim: 128
-    mask_punctuation: true
-    overwrite: false
