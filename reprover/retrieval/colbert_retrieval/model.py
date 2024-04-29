@@ -159,7 +159,6 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         n_log_premises: int = None,
         debug: bool = False,
     ) -> None:
-        self.save_hyperparameters()
         BasePremiseRetriever.__init__(self)
         ColBERTPremiseRetriever.__init__(
             self,
@@ -167,6 +166,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
             num_retrieved=num_retrieved,
             verbose=verbose,
         )
+        self.save_hyperparameters()
         self.lr = lr
         self.warmup_steps = warmup_steps
         self.config.configure(lr=self.lr, warmup=self.warmup_steps)
