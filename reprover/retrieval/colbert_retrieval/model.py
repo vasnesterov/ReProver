@@ -18,10 +18,9 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
     def __init__(
         self,
         config: ColBERTConfig,
-        num_retrieved: int = 100,
-        verbose: int = 3,
     ) -> None:
         super().__init__()
+        verbose = 3
 
         index_root = Path(config.index_root_)
 
@@ -47,11 +46,10 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
 
         self.indexer = ColBERTIndexer(self.checkpoint, config=self.config)
         self.indexer.configure(
-            root=index_root.parent.parent.as_posix(),
+            root=index_root.parent.parent.absolute().as_posix(),
             experiment=colbert_config.experiment,
         )
         self.index_name = colbert_config.index_name
-        self.num_retrieved = num_retrieved
 
     @property
     def embedding_size(self) -> int:
@@ -107,7 +105,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         for query_idx in range(len(context_emb)):
             pids, ranks, scores = self.searcher.dense_search(
                 context_emb[query_idx : query_idx + 1],
-                self.num_retrieved,
+                self.config.num_retrieved,
                 filter_fn=None,
                 pids=None,
             )
@@ -152,29 +150,20 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
     def __init__(
         self,
         config: ColBERTConfig,
-        num_retrieved: int = 100,
-        lr: float = 1e-5,
-        warmup_steps: int = 20000,
-        verbose: int = 3,
-        n_log_premises: int = None,
-        debug: bool = False,
     ) -> None:
         BasePremiseRetriever.__init__(self)
         ColBERTPremiseRetriever.__init__(
             self,
             config=config,
-            num_retrieved=num_retrieved,
-            verbose=verbose,
         )
+
         self.save_hyperparameters()
-        self.lr = lr
-        self.warmup_steps = warmup_steps
+        self.lr = config.lr
+        self.warmup_steps = config.warmup
         self.config.configure(lr=self.lr, warmup=self.warmup_steps)
-        self.debug = debug
-        if n_log_premises is None:
-            self.n_log_premises = num_retrieved
-        else:
-            self.n_log_premises = n_log_premises
+        self.debug = config.debug
+        if config.n_log_premises is None:
+            self.n_log_premises = config.num_retrieved
 
         print(self.checkpoint)
 
@@ -256,18 +245,18 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         retrieved_premises, _ = self.retrieve_from_preprocessed(batch)
 
         # Evaluation & logging.
-        recall_ats = [1, 10, self.num_retrieved]  # k-s to report Recall@k
+        recall_ats = [1, 10, self.config.num_retrieved]  # k-s to report Recall@k
         recall = [[] for _ in recall_ats]
         MRR = []
         num_with_premises = 0
-        text_columns_to_log = ["ground truth", "retrieved", f"Recall@{self.num_retrieved}"]
+        text_columns_to_log = ["ground truth", "retrieved", f"Recall@{self.config.num_retrieved}"]
         text_to_log = []
 
         for i, (all_pos_premises, premises) in enumerate(zip_strict(batch["positive_passages"], retrieved_premises)):
             # Only log the first example in the batch.
             if i == 0:
                 msg_gt = all_pos_premises
-                msg_retrieved = "\n\n".join([f"{j}. {p}" for j, p in enumerate(premises[: self.n_log_premises])])
+                msg_retrieved = "\n\n".join([f"{j}. {p}" for j, p in enumerate(premises[: self.config.n_log_premises])])
                 TP = len(set(premises).intersection(all_pos_premises))
                 if len(all_pos_premises) == 0:
                     r = math.nan

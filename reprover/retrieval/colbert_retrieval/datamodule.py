@@ -9,8 +9,7 @@ from colbert.data.examples import Examples
 from colbert.data.queries import Queries
 from colbert.infra.config import ColBERTConfig
 from colbert.infra.config.config import ColBERTConfig
-from colbert.modeling.tokenization import (DocTokenizer, QueryTokenizer,
-                                           tensorize_triples)
+from colbert.modeling.tokenization import DocTokenizer, QueryTokenizer, tensorize_triples
 from colbert.utils.utils import zipstar
 from torch.utils.data import DataLoader, Dataset
 
@@ -53,7 +52,7 @@ class ColBERTDataset(Dataset):
         passages = list(chain(*passages))
 
         Q, D, s = self.tensorize_triples(queries, passages, scores, bsize, self.nway)[0]
-        batch = {"queries": Q, "passages": D, "scores": s, "positive_passages": positive_passages}
+        batch = {"queries": Q, "passages": D, "scores": s, "positive_passages": positive_passages, "contexts": queries}
         return batch
 
 
