@@ -31,16 +31,16 @@ trainer:
 
 model:
   config:
-    checkpoint: kaiyuy/leandojo-lean4-retriever-byt5-small
-    collection: ../../../data/leandojo_benchmark_4/random/collection.tsv
-    index_name: colbert_v1
-    experiment: lean
+    checkpoint: microsoft/deberta-v3-xsmall
+    collection: ../../../data/leandojo_benchmark_4/random_debug/collection.tsv
+    index_name: debug
+    experiment: debug
     root: ../../../experiments/
     warmup: 20000
     lr: 1e-5
     num_retrieved: 100
     n_log_premises: 10
-    nway: 4
+    nway: 2
     query_maxlen: 128
     doc_maxlen: 180
     mask_punctuation: false
@@ -62,7 +62,7 @@ model:
     overwrite: false
 
 data:
-  data_path: data/leandojo_benchmark_4/random/
+  data_path: data/leandojo_benchmark_4/random_debug/
   batch_size: 4  # training batch size
   eval_batch_size: 16 # the batch size will be used for corpus reindexing
   num_workers: 0

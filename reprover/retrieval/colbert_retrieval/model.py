@@ -206,7 +206,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
             )
 
         positive_avg = scores[:, 0].mean().item()
-        negative_avg = scores[:, 1].mean().item()
+        negative_avg = scores[:, 1:].max(dim=-1).values.mean().item()
 
         metrics = {
             "positive_score": positive_avg,
