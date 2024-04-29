@@ -30,37 +30,38 @@ trainer:
       project: lean-colbert
 
 model:
-  num_retrieved: 100
-  lr: 1e-5
-  warmup_steps: 20000
   config:
-    checkpoint: microsoft/deberta-v3-xsmall
-    collection: ./data/leandojo_benchmark_4/random/collection.tsv
+    checkpoint: kaiyuy/leandojo-lean4-retriever-byt5-small
+    collection: ../../../data/leandojo_benchmark_4/random/collection.tsv
     index_name: colbert_v1
     experiment: lean
-    root: "./experiments/"
+    root: ../../../experiments/
+    warmup: 20000
+    lr: 1e-5
+    num_retrieved: 100
+    n_log_premises: 10
+    nway: 1
+    query_maxlen: 128
+    doc_maxlen: 180
+    mask_punctuation: false
 
     nbits: 1
     kmeans_niters: 20
     resume: false
     similarity: cosine
     relu: false
-    nway: 16
     use_ib_negatives: true
     drop_duplciate_passages: false
     reranker: false
     distillation_alpha: 1.0
     ignore_scores: false
-    query_maxlen: 128
-    doc_maxlen: 180
     attend_to_mask_tokens: false
     interaction: colbert
     dim: 128
-    mask_punctuation: true
     overwrite: false
 
 data:
   data_path: data/leandojo_benchmark_4/random/
-  batch_size: 24  # training batch size
-  eval_batch_size: 24 # the batch size will be used for corpus reindexing
-  num_workers: 4
+  batch_size: 4  # training batch size
+  eval_batch_size: 16 # the batch size will be used for corpus reindexing
+  num_workers: 0

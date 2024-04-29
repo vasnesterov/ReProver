@@ -20,6 +20,7 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         config: ColBERTConfig,
     ) -> None:
         super().__init__()
+        assert config.checkpoint is not None
         verbose = 3
 
         index_root = Path(config.index_root_)
@@ -30,7 +31,9 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
             index_config = ColBERTConfig.load_from_index(index_path.as_posix())
         index_config = config
 
-        checkpoint_config = ColBERTConfig.load_from_checkpoint(config.checkpoint)
+        checkpoint_config = index_config
+        if config.checkpoint is not None:
+            checkpoint_config = ColBERTConfig.load_from_checkpoint(config.checkpoint)
         colbert_config = ColBERTConfig.from_existing(checkpoint_config, index_config, config)
 
         checkpoint = TrainingCheckpoint(config.checkpoint, colbert_config=colbert_config, verbose=verbose)
