@@ -6,8 +6,7 @@ import numpy as np
 import torch
 from colbert.infra.config import ColBERTConfig
 from reprover.common import Context, Premise, zip_strict
-from reprover.retrieval.base_model import (BasePremiseRetriever,
-                                           PremiseRetrieverAPI)
+from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetrieverAPI
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
 from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
 from reprover.retrieval.colbert_retrieval.searcher import TrainingSearcher
@@ -160,8 +159,8 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         n_log_premises: int = None,
         debug: bool = False,
     ) -> None:
+        self.save_hyperparameters()
         BasePremiseRetriever.__init__(self)
-        # self.save_hyperparameters()
         ColBERTPremiseRetriever.__init__(
             self,
             config=config,
@@ -257,7 +256,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         retrieved_premises, _ = self.retrieve_from_preprocessed(batch)
 
         # Evaluation & logging.
-        recall_ats = [1, 10, self.num_retrieved] # k-s to report Recall@k
+        recall_ats = [1, 10, self.num_retrieved]  # k-s to report Recall@k
         recall = [[] for _ in recall_ats]
         MRR = []
         num_with_premises = 0
