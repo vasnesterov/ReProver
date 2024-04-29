@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import tqdm
 from jsonargparse import ArgumentParser
-from jsonargparse.typing import Path_drw, Path_fr
+from jsonargparse.typing import Path_dc, Path_drw, Path_fr
 from reprover.common import Context, Corpus, Premise
 from reprover.retrieval.datamodule import RetrievalDataset
 
@@ -18,6 +18,9 @@ class PremiseOrQueryDataset:
         self.txt_to_id = {}
         self.value_name = value_name
         self.key_name = key_name
+
+    def __len__(self):
+        return len(self.id_to_txt)
 
     def add(self, example: Union[Premise, Context]):
         example = example.serialize()
@@ -76,10 +79,12 @@ def get_retrieval_dataset(
 
 
 def get_premises_from_dataset(
-    retrieval_dataset: RetrievalDataset, return_pandas: bool = False
+    retrieval_dataset: RetrievalDataset, return_pandas: bool = False, limit_premises: int = None
 ) -> Union[PremiseOrQueryDataset, pd.DataFrame]:
+    if limit_premises is None:
+        limit_premises = len(retrieval_dataset.corpus.all_premises)
     premises = PremiseOrQueryDataset(key_name="pid", value_name="passage")
-    for pr in retrieval_dataset.corpus.all_premises:
+    for pr in retrieval_dataset.corpus.all_premises[:limit_premises]:
         premises.add(pr)
 
     if return_pandas:
@@ -90,6 +95,7 @@ def get_premises_from_dataset(
 def get_queries_from_dataset(
     retrieval_dataset: RetrievalDataset, return_pandas: bool = False
 ) -> Union[PremiseOrQueryDataset, pd.DataFrame]:
+
     queries = PremiseOrQueryDataset(key_name="qid", value_name="question")
     for example in retrieval_dataset.data:
         queries.add(example["context"])
@@ -103,29 +109,45 @@ def get_triples(
     queries_dataset: PremiseOrQueryDataset,
     retrieval_dataset: RetrievalDataset,
     num_negatives: int = 1,
+    limit_dataset: int = None,
     seed: Optional[int] = 1234,
 ) -> List[Tuple[str, str, str]]:
     random.seed(seed)
     np.random.seed(seed)
 
+    if limit_dataset is None:
+        limit_dataset = len(retrieval_dataset)
+
     triples = []
-    for i in tqdm.tqdm(range(len(retrieval_dataset))):
-        example = retrieval_dataset[i]
-        pos_premise_id = premises_dataset.get_id_by_example(example["pos_premise"])
+    with tqdm.tqdm(range(limit_dataset)) as pbar:
+        for i in range(len(retrieval_dataset)):
+            example = retrieval_dataset[i]
+            pos_premise_id = premises_dataset.get_id_by_example(example["pos_premise"], missing_ok=True)
 
-        negatives = []
+            if pos_premise_id is None:
+                continue
 
-        for i in range(num_negatives):
-            neg_premise_id = premises_dataset.get_id_by_example(example["neg_premises"][i], missing_ok=False)
-            negatives.append([neg_premise_id, 0.0])
+            negatives = []
 
-        triples.append(
-            (
-                queries_dataset.get_id_by_example(example["context"]),
-                [pos_premise_id, 1.0],
-                *negatives,
+            for i in range(num_negatives):
+                neg_premise_id = premises_dataset.get_id_by_example(example["neg_premises"][i], missing_ok=True)
+                if neg_premise_id is None:
+                    neg_premise_id = np.random.randint(len(premises_dataset))
+                    while neg_premise_id == pos_premise_id:
+                        neg_premise_id = np.random.randint(len(premises_dataset))
+
+                negatives.append([neg_premise_id, 0.0])
+
+            triples.append(
+                (
+                    queries_dataset.get_id_by_example(example["context"]),
+                    [pos_premise_id, 1.0],
+                    *negatives,
+                )
             )
-        )
+            pbar.update(1)
+            if len(triples) >= limit_dataset:
+                break
 
     return triples
 
@@ -136,41 +158,37 @@ def convert_to_colbert(
     save_dir: Union[Path, str],
     num_negatives: int,
     num_in_file_negatives: int,
+    limit_collection: int = None,
+    limit_triples: int = None,
     seed: Optional[int] = 1234,
 ) -> None:
 
-    corpus = None
+    corpus = Corpus(corpus_path)
+
     premises = None
-    for split in ['train', 'val', 'test']:
+    for split in ["train", "val", "test"]:
         print(f"Processing {split} dataset")
         premises_path = Path(premises_dir) / f"{split}.json"
-        if corpus is None:
-            retrieval_dataset = get_retrieval_dataset(
-                [premises_path],
-                corpus_path,
-                num_negatives=num_negatives,
-                num_in_file_negatives=num_in_file_negatives,
-            )
-            corpus = retrieval_dataset.corpus
-        else:
-            retrieval_dataset = get_retrieval_dataset(
-                [premises_path],
-                corpus,
-                num_negatives=num_negatives,
-                num_in_file_negatives=num_in_file_negatives,
-            )
+        retrieval_dataset = get_retrieval_dataset(
+            [premises_path],
+            corpus,
+            num_negatives=num_negatives,
+            num_in_file_negatives=num_in_file_negatives,
+        )
 
         if premises is None:
-            premises = get_premises_from_dataset(retrieval_dataset)
+            premises = get_premises_from_dataset(retrieval_dataset, limit_premises=limit_collection)
 
         queries = get_queries_from_dataset(retrieval_dataset)
-        triples = get_triples(premises, queries, retrieval_dataset, num_negatives=num_negatives, seed=seed)
+        triples = get_triples(
+            premises, queries, retrieval_dataset, num_negatives=num_negatives, limit_dataset=limit_triples, seed=seed
+        )
         queries.to_json(Path(save_dir) / f"queries_{split}.json")
 
         with jsonlines.open(Path(save_dir) / f"triples_{split}.json", "w") as writer:
             for triple in triples:
                 writer.write(triple)
-        print('-' * 80)
+        print("-" * 80)
 
     premises.to_tsv(Path(save_dir) / "collection.tsv")
 
@@ -181,7 +199,7 @@ if __name__ == "__main__":
     parser.add_argument("--corpus_path", type=Path_fr, help="Path to corpus")
     parser.add_argument(
         "--save_dir",
-        type=Path_drw,
+        type=Path_dc,
         help="Path to save dir",
     )
     parser.add_argument("--num_negatives", type=int, help="Number of negatives per query to generate")
@@ -190,9 +208,23 @@ if __name__ == "__main__":
         type=int,
         help="Number of in-file-negatives per query to generate",
     )
+    parser.add_argument(
+        "--limit_collection",
+        type=int,
+        default=None,
+        help="Limit number of premises in collection",
+    )
+    parser.add_argument(
+        "--limit_triples",
+        type=int,
+        default=None,
+        help="Limit number of triples",
+    )
     parser.add_argument("--seed", type=int, default=1234, help="Random seed")
 
     args = parser.parse_args()
+
+    Path(args.save_dir).mkdir(exist_ok=True, parents=True)
 
     convert_to_colbert(
         args.premises_dir,
@@ -200,5 +232,7 @@ if __name__ == "__main__":
         args.save_dir,
         num_negatives=args.num_negatives,
         num_in_file_negatives=args.num_in_file_negatives,
+        limit_collection=args.limit_collection,
+        limit_triples=args.limit_triples,
         seed=args.seed,
     )

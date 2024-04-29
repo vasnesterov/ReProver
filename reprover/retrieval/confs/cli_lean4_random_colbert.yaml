@@ -44,6 +44,8 @@ model:
     query_maxlen: 128
     doc_maxlen: 180
     mask_punctuation: false
+    debug: false
+    ignore_scores: true
 
     nbits: 1
     kmeans_niters: 20
