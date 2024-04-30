@@ -6,8 +6,7 @@ import numpy as np
 import torch
 from colbert.infra.config import ColBERTConfig
 from reprover.common import Context, Premise, zip_strict
-from reprover.retrieval.base_model import (BasePremiseRetriever,
-                                           PremiseRetrieverAPI)
+from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetrieverAPI
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
 from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
 from reprover.retrieval.colbert_retrieval.searcher import TrainingSearcher
@@ -228,13 +227,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         loss, metrics = self(batch)
 
         for key, value in metrics.items():
-            self.log(
-                f"train/{key}",
-                value,
-                on_epoch=True,
-                sync_dist=True,
-                batch_size=len(batch),
-            )
+            self.log(f"train/{key}", value, on_epoch=True, sync_dist=True, batch_size=len(batch), prog_bar=True)
         return loss
 
     def on_validation_start(self) -> None:
@@ -294,12 +287,7 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
                 on_epoch=True,
                 sync_dist=True,
                 batch_size=num_with_premises,
+                prog_bar=True,
             )
 
-        self.log(
-            "val/MRR",
-            np.mean(MRR),
-            on_epoch=True,
-            sync_dist=True,
-            batch_size=num_with_premises,
-        )
+        self.log("val/MRR", np.mean(MRR), on_epoch=True, sync_dist=True, batch_size=num_with_premises, prog_bar=True)
