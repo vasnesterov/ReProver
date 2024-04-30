@@ -6,7 +6,8 @@ import numpy as np
 import torch
 from colbert.infra.config import ColBERTConfig
 from reprover.common import Context, Premise, zip_strict
-from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetrieverAPI
+from reprover.retrieval.base_model import (BasePremiseRetriever,
+                                           PremiseRetrieverAPI)
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
 from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
 from reprover.retrieval.colbert_retrieval.searcher import TrainingSearcher

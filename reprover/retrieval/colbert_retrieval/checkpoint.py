@@ -29,7 +29,7 @@ class TrainingCheckpoint(ColBERT):
         assert query_token_id_doc == query_token_id_query
 
         self.bert.resize_token_embeddings(len(self.query_tokenizer.tok))
-        self.amp_manager = MixedPrecisionManager(True)
+        # self.amp_manager = MixedPrecisionManager(True)
 
     def query(self, *args, to_cpu=False, **kw_args):
         Q = super().query(*args, **kw_args)
