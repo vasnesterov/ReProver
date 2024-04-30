@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 from colbert.infra.config import ColBERTConfig
+from pytorch_lightning import LightningModule
 from reprover.common import Context, Premise, zip_strict
 from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetrieverAPI
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
@@ -14,46 +15,7 @@ from reprover.retrieval.colbert_retrieval.searcher import TrainingSearcher
 torch.set_float32_matmul_precision("medium")
 
 
-class ColBERTPremiseRetriever(PremiseRetrieverAPI):
-    def __init__(
-        self,
-        config: ColBERTConfig,
-    ) -> None:
-        super().__init__()
-        assert config.checkpoint is not None
-        verbose = 3
-
-        index_root = Path(config.index_root_)
-
-        # don't load index config if there is no index
-        index_path = index_root / config.index_name
-        if (index_path / "metadata.json").exists() or (index_path / "plan.json").exists():
-            index_config = ColBERTConfig.load_from_index(index_path.as_posix())
-        index_config = config
-
-        checkpoint_config = index_config
-        if config.checkpoint is not None:
-            checkpoint_config = ColBERTConfig.load_from_checkpoint(config.checkpoint)
-        colbert_config = ColBERTConfig.from_existing(checkpoint_config, index_config, config)
-
-        checkpoint = TrainingCheckpoint(config.checkpoint, colbert_config=colbert_config, verbose=verbose)
-
-        self.searcher = TrainingSearcher(
-            checkpoint=checkpoint,
-            config=checkpoint.colbert_config,
-            verbose=verbose,
-        )
-
-        self.checkpoint = self.searcher.checkpoint
-        self.config = self.searcher.config
-
-        self.indexer = ColBERTIndexer(self.checkpoint, config=self.config)
-        self.indexer.configure(
-            root=index_root.parent.parent.absolute().as_posix(),
-            experiment=colbert_config.experiment,
-        )
-        self.index_name = colbert_config.index_name
-
+class RetrievalMixin:
     @property
     def embedding_size(self) -> int:
         """Return the size of the feature vector produced by ``encoder``."""
@@ -149,18 +111,88 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI):
         return ranking, retrieved_premises, retrieved_scores
 
 
-class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetriever):
+class ColBERTPremiseRetriever(PremiseRetrieverAPI, RetrievalMixin):
     def __init__(
         self,
         config: ColBERTConfig,
     ) -> None:
-        BasePremiseRetriever.__init__(self)
-        ColBERTPremiseRetriever.__init__(
-            self,
-            config=config,
+        super().__init__()
+        assert config.checkpoint is not None
+        verbose = 3
+
+        index_root = Path(config.index_root_)
+
+        # don't load index config if there is no index
+        index_path = index_root / config.index_name
+        if (index_path / "metadata.json").exists() or (index_path / "plan.json").exists():
+            index_config = ColBERTConfig.load_from_index(index_path.as_posix())
+        index_config = config
+
+        checkpoint_config = index_config
+        if config.checkpoint is not None:
+            checkpoint_config = ColBERTConfig.load_from_checkpoint(config.checkpoint)
+        colbert_config = ColBERTConfig.from_existing(checkpoint_config, index_config, config)
+
+        checkpoint = TrainingCheckpoint(config.checkpoint, colbert_config=colbert_config, verbose=verbose)
+
+        self.searcher = TrainingSearcher(
+            checkpoint=checkpoint,
+            config=checkpoint.colbert_config,
+            verbose=verbose,
         )
 
-        self.save_hyperparameters()
+        self.checkpoint = self.searcher.checkpoint
+        self.config = self.searcher.config
+
+        self.indexer = ColBERTIndexer(self.checkpoint, config=self.config)
+        self.indexer.configure(
+            root=index_root.parent.parent.absolute().as_posix(),
+            experiment=colbert_config.experiment,
+        )
+        self.index_name = colbert_config.index_name
+
+
+class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, LightningModule):
+    def __init__(
+        self,
+        config: ColBERTConfig,
+    ) -> None:
+        # TODO: too many classes and inheritances and duplicated code.
+        super().__init__()
+
+        assert config.checkpoint is not None
+
+        index_root = Path(config.index_root_)
+
+        # don't load index config if there is no index
+        index_path = index_root / config.index_name
+        if (index_path / "metadata.json").exists() or (index_path / "plan.json").exists():
+            index_config = ColBERTConfig.load_from_index(index_path.as_posix())
+        index_config = config
+
+        checkpoint_config = index_config
+        if config.checkpoint is not None:
+            checkpoint_config = ColBERTConfig.load_from_checkpoint(config.checkpoint)
+        colbert_config = ColBERTConfig.from_existing(checkpoint_config, index_config, config)
+
+        checkpoint = TrainingCheckpoint(config.checkpoint, colbert_config=colbert_config, verbose=3)
+
+        self.searcher = TrainingSearcher(
+            checkpoint=checkpoint,
+            config=checkpoint.colbert_config,
+            verbose=3,
+        )
+
+        self.checkpoint = self.searcher.checkpoint
+        self.config = self.searcher.config
+
+        self.indexer = ColBERTIndexer(self.checkpoint, config=self.config)
+        self.indexer.configure(
+            root=index_root.parent.parent.absolute().as_posix(),
+            experiment=colbert_config.experiment,
+        )
+        self.index_name = colbert_config.index_name
+
         self.lr = config.lr
         self.warmup_steps = config.warmup
         self.config.configure(lr=self.lr, warmup=self.warmup_steps)
@@ -168,7 +200,10 @@ class ColBERTPremiseRetrieverLightning(BasePremiseRetriever, ColBERTPremiseRetri
         if config.n_log_premises is None:
             self.n_log_premises = config.num_retrieved
 
+        config = self.config
+        self.save_hyperparameters()
         print(self.checkpoint)
+        print(self.hparams)
 
     @classmethod
     def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":

@@ -3,27 +3,20 @@
 import pickle
 from typing import List, Tuple, Union
 
+import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from lean_dojo import Pos
 from loguru import logger
+from reprover.common import Context, Corpus, Premise, cpu_checkpointing_enabled, load_checkpoint, zip_strict
+from reprover.retrieval.base_model import BasePremiseRetriever
 from tqdm import tqdm
 from transformers import AutoTokenizer, T5EncoderModel
-
-from reprover.common import (
-    Context,
-    Corpus,
-    Premise,
-    cpu_checkpointing_enabled,
-    load_checkpoint,
-    zip_strict,
-)
-from reprover.retrieval.base_model import BasePremiseRetriever
 
 torch.set_float32_matmul_precision("medium")
 
 
-class PremiseRetriever(BasePremiseRetriever):
+class PremiseRetriever(pl.LightningModule, BasePremiseRetriever):
     def __init__(
         self,
         model_name: str,
@@ -70,9 +63,7 @@ class PremiseRetriever(BasePremiseRetriever):
             self.corpus_embeddings = indexed_corpus.embeddings
             self.embeddings_staled = False
 
-    def _encode(
-        self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor
-    ) -> torch.FloatTensor:
+    def _encode(self, input_ids: torch.LongTensor, attention_mask: torch.LongTensor) -> torch.FloatTensor:
         """Encode a premise or a context into a feature vector."""
         if cpu_checkpointing_enabled(self):
             hidden_states = torch.utils.checkpoint.checkpoint(
@@ -87,9 +78,7 @@ class PremiseRetriever(BasePremiseRetriever):
 
         # Masked average.
         lens = attention_mask.sum(dim=1)
-        features = (hidden_states * attention_mask.unsqueeze(2)).sum(
-            dim=1
-        ) / lens.unsqueeze(1)
+        features = (hidden_states * attention_mask.unsqueeze(2)).sum(dim=1) / lens.unsqueeze(1)
 
         # Normalize the feature vector to have unit norm.
         return F.normalize(features, dim=1)
@@ -108,10 +97,7 @@ class PremiseRetriever(BasePremiseRetriever):
         # Encode the query and positive/negative documents.
         context_emb = self._encode(context_ids, context_mask)
         pos_premise_emb = self._encode(pos_premise_ids, pos_premise_mask)
-        neg_premise_embs = [
-            self._encode(ids, mask)
-            for ids, mask in zip_strict(neg_premises_ids, neg_premises_mask)
-        ]
+        neg_premise_embs = [self._encode(ids, mask) for ids, mask in zip_strict(neg_premises_ids, neg_premises_mask)]
         all_premise_embs = torch.cat([pos_premise_emb, *neg_premise_embs], dim=0)
 
         # Cosine similarities for unit-norm vectors are just inner products.
@@ -174,10 +160,7 @@ class PremiseRetriever(BasePremiseRetriever):
         if reindex_corpus or self.embeddings_staled:
             self.reindex_corpus(batch_size=reindex_batch_size)
 
-        ctx = [
-            Context(*_)
-            for _ in zip_strict(file_name, theorem_full_name, theorem_pos, state)
-        ]
+        ctx = [Context(*_) for _ in zip_strict(file_name, theorem_full_name, theorem_pos, state)]
         ctx_tokens = self.tokenizer(
             [_.serialize() for _ in ctx],
             padding="longest",

@@ -71,7 +71,7 @@ class PremiseRetrieverAPI(ABC):
         pass
 
 
-class BasePremiseRetriever(pl.LightningModule, PremiseRetrieverAPI):
+class BasePremiseRetriever(PremiseRetrieverAPI):
     @classmethod
     @abstractmethod
     def load(cls, ckpt_path: str, device, freeze: bool) -> "BasePremiseRetriever":
