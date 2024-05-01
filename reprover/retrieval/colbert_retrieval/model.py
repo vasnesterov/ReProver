@@ -120,6 +120,9 @@ class ColBERTPremiseRetriever(PremiseRetrieverAPI, RetrievalMixin):
         assert config.checkpoint is not None
         verbose = 3
 
+        if config.num_negatives is not None:
+            config.nway = config.num_negatives
+
         index_root = Path(config.index_root_)
 
         # don't load index config if there is no index

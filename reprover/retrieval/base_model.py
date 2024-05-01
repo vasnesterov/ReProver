@@ -7,11 +7,11 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
-import pytorch_lightning as pl
 import torch
 from lean_dojo import Pos
 from loguru import logger
-from reprover.common import Corpus, Premise, get_optimizers, zip_strict
+from reprover.common import Corpus, Premise, zip_strict
+from reprover.common_torch import get_optimizers
 
 torch.set_float32_matmul_precision("medium")
 

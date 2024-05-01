@@ -8,7 +8,8 @@ import torch
 import torch.nn.functional as F
 from lean_dojo import Pos
 from loguru import logger
-from reprover.common import Context, Corpus, Premise, cpu_checkpointing_enabled, load_checkpoint, zip_strict
+from reprover.common import Context, Corpus, Premise, zip_strict
+from reprover.common_torch import cpu_checkpointing_enabled, load_checkpoint
 from reprover.retrieval.base_model import BasePremiseRetriever
 from tqdm import tqdm
 from transformers import AutoTokenizer, T5EncoderModel

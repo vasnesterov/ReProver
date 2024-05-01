@@ -13,15 +13,8 @@ import torch.nn.functional as F
 from lean_dojo import Pos
 from loguru import logger
 from peft import LoraConfig, get_peft_model
-from reprover.common import (
-    Context,
-    Corpus,
-    Premise,
-    cpu_checkpointing_enabled,
-    get_optimizers,
-    load_checkpoint,
-    zip_strict,
-)
+from reprover.common import Context, Corpus, Premise, zip_strict
+from reprover.common_torch import cpu_checkpointing_enabled, get_optimizers, load_checkpoint
 from tqdm import tqdm
 from transformers import AutoTokenizer, LlamaModel, T5EncoderModel
 

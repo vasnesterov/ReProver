@@ -5,16 +5,14 @@ import json
 import os
 import random
 from copy import deepcopy
+from pathlib import Path
 from typing import List, Optional
 
 import pytorch_lightning as pl
 import torch
-from colbert.infra.config import ColBERTConfig
-from colbert.modeling.tokenization import DocTokenizer, QueryTokenizer
 from lean_dojo import LeanGitRepo, Pos
 from loguru import logger
-from reprover.common import (Batch, Context, Corpus, Example, format_state,
-                             get_all_pos_premises)
+from reprover.common import Batch, Context, Corpus, Example, format_state, get_all_pos_premises
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -40,11 +38,18 @@ class RetrievalDataset(Dataset):
         self.context_tokenizer = context_tokenizer
         self.premise_tokenizer = premise_tokenizer
         self.is_train = is_train
-        self.data = list(
-            itertools.chain.from_iterable(self._load_data(path) for path in data_paths)
-        )
+        self.data = list(itertools.chain.from_iterable(self._load_data(path) for path in data_paths))
 
-    def _load_data(self, data_path: str) -> List[Example]:
+    def save_data(self, data_path: str):
+        data_path = Path(data_path)
+        if data_path.exists():
+            raise ValueError(f"{data_path} already exists")
+        torch.save({"data": self.data}, data_path)
+
+    def _load_data(self, data_path: Path | str) -> List[Example]:
+        if str(data_path).endswith(".ckpt"):
+            return torch.load(data_path)["data"]
+
         data = []
         logger.info(f"Loading data from {data_path}")
 
@@ -53,12 +58,8 @@ class RetrievalDataset(Dataset):
 
             for i, tac in enumerate(thm["traced_tactics"]):
                 state = format_state(tac["state_before"])
-                context = Context(
-                    file_path, thm["full_name"], Pos(*thm["start"]), state
-                )
-                all_pos_premises = get_all_pos_premises(
-                    tac["annotated_tactic"], self.corpus
-                )
+                context = Context(file_path, thm["full_name"], Pos(*thm["start"]), state)
+                all_pos_premises = get_all_pos_premises(tac["annotated_tactic"], self.corpus)
 
                 if self.is_train:
                     # In training, we ignore tactics that do not have any premises.
@@ -116,17 +117,13 @@ class RetrievalDataset(Dataset):
 
         for p in self.corpus.transitive_dep_graph.successors(ex["context"].path):
             if p == ex["pos_premise"].path:
-                premises_in_file += [
-                    _p for _p in self.corpus.get_premises(p) if _p != ex["pos_premise"]
-                ]
+                premises_in_file += [_p for _p in self.corpus.get_premises(p) if _p != ex["pos_premise"]]
             else:
                 premises_outside_file += self.corpus.get_premises(p)
 
         num_in_file_negatives = min(len(premises_in_file), self.num_in_file_negatives)
 
-        ex["neg_premises"] = random.sample(
-            premises_in_file, num_in_file_negatives
-        ) + random.sample(
+        ex["neg_premises"] = random.sample(premises_in_file, num_in_file_negatives) + random.sample(
             premises_outside_file, self.num_negatives - num_in_file_negatives
         )
         return ex
@@ -171,9 +168,7 @@ class RetrievalDataset(Dataset):
                     if k < batch_size:
                         pos_premise_k = examples[k]["pos_premise"]
                     else:
-                        pos_premise_k = examples[k % batch_size]["neg_premises"][
-                            k // batch_size - 1
-                        ]
+                        pos_premise_k = examples[k % batch_size]["neg_premises"][k // batch_size - 1]
                     label[j, k] = float(pos_premise_k in all_pos_premises)
 
             batch["label"] = label
@@ -267,10 +262,7 @@ class RetrievalDataModule(pl.LightningDataModule):
 
         if stage in (None, "fit", "predict"):
             self.ds_pred = RetrievalDataset(
-                [
-                    os.path.join(self.data_path, f"{split}.json")
-                    for split in ("train", "val", "test")
-                ],
+                [os.path.join(self.data_path, f"{split}.json") for split in ("train", "val", "test")],
                 self.corpus,
                 self.num_negatives,
                 self.num_in_file_negatives,
@@ -312,44 +304,3 @@ class RetrievalDataModule(pl.LightningDataModule):
             pin_memory=True,
             drop_last=False,
         )
-
-
-class ColBERTRetrievalDataModule(RetrievalDataModule):
-    def __init__(
-        self,
-        data_path: str,
-        corpus_path: str,
-        num_negatives: int,
-        num_in_file_negatives: int,
-        colbert_config: ColBERTConfig,
-        batch_size: int,
-        eval_batch_size: int,
-        max_seq_len: int,
-        num_workers: int,
-        verbose: int = 3,
-    ) -> None:
-        super(RetrievalDataModule, self).__init__()
-        self.data_path = data_path
-        self.num_negatives = num_negatives
-        assert 0 <= num_in_file_negatives <= num_negatives
-        self.num_in_file_negatives = num_in_file_negatives
-        self.batch_size = batch_size
-        self.eval_batch_size = eval_batch_size
-        self.max_seq_len = max_seq_len
-        self.num_workers = num_workers
-
-        colbert_config = deepcopy(colbert_config)
-        colbert_config.configure(gpus=0)
-
-        self.context_tokenizer = QueryTokenizer(colbert_config, verbose=verbose)
-        self.premise_tokenizer = DocTokenizer(colbert_config)
-        if self.context_tokenizer.pad_token is None:
-            self.context_tokenizer.pad_token = self.context_tokenizer.unk_token
-
-        self.premise_tokenizer.pad_token = self.premise_tokenizer.tok.pad_token
-        if self.premise_tokenizer.pad_token is None:
-            self.premise_tokenizer.pad_token = self.premise_tokenizer.unk_token
-        self.corpus = Corpus(corpus_path)
-
-        metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
-        repo = LeanGitRepo(**metadata["from_repo"])

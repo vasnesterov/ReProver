@@ -13,15 +13,8 @@ import torch
 from lean_dojo import Pos
 from lean_dojo.utils import execute
 from loguru import logger
-from reprover.common import (
-    IndexedCorpus,
-    _format_augmented_state,
-    format_augmented_state,
-    get_optimizers,
-    load_checkpoint,
-    remove_marks,
-    zip_strict,
-)
+from reprover.common import IndexedCorpus, _format_augmented_state, format_augmented_state, remove_marks, zip_strict
+from reprover.common_torch import get_optimizers, load_checkpoint
 from reprover.retrieval.model import PremiseRetriever
 from torchmetrics import Metric
 from transformers import AutoTokenizer, T5ForConditionalGeneration

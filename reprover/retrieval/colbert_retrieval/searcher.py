@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Union
 
+import torch
 from colbert.data import Collection
 from colbert.infra.config import ColBERTConfig
 from colbert.infra.config.utils import copy_essential_config
@@ -34,16 +35,11 @@ class TrainingSearcher(Searcher):
         self.collection = Collection.cast(self.config.collection)
         self.configure(checkpoint=self.checkpoint.name, collection=self.collection)
 
-        use_gpu = self.config.total_visible_gpus > 0
-        if use_gpu:
-            self.checkpoint = self.checkpoint.cuda()
         load_index_with_mmap = self.config.load_index_with_mmap
-        if load_index_with_mmap and use_gpu:
-            raise ValueError(f"Memory-mapped index can only be used with CPU!")
 
         self.ranker = None
-        self.use_gpu = use_gpu
         self.load_index_with_mmap = load_index_with_mmap
 
     def init_ranker(self):
-        self.ranker = IndexScorer(self.index, self.use_gpu, self.load_index_with_mmap)
+        use_gpu = torch.device(self.checkpoint.device) != torch.device("cpu")
+        self.ranker = IndexScorer(self.index, use_gpu, self.load_index_with_mmap)
