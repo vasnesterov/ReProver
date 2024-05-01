@@ -73,5 +73,5 @@ data:
   corpus_path: ../../../data/leandojo_benchmark_4/corpus.jsonl
   data_dir: data/leandojo_benchmark_4/random/
   batch_size: 16  # training batch size
-  eval_batch_size: 64 # the batch size will be used for corpus reindexing
+  eval_batch_size: 80 # the batch size will be used for corpus reindexing
   num_workers: 0

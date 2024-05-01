@@ -255,8 +255,7 @@ class ColBERTDataModuleNative(pl.LightningDataModule):
             collate_fn=self.ds_val.collate,
             shuffle=False,
             pin_memory=True,
-            # drop_last=False,
-            drop_last=True,  # TODO: fix it
+            drop_last=False,
         )
 
     def predict_dataloader(self) -> DataLoader:
