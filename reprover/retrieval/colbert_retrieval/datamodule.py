@@ -164,14 +164,14 @@ class ColBERTDatasetNative(RetrievalDataset):
 
             passages.append(example["pos_premise"].serialize())
             positive_passages.append(passages[-1][0])
-            passages.extend(p.serialize() for p in example["neg_premises"])
+            passages.extend([p.serialize() for p in example["neg_premises"]])
             s = [0.0] * (len(example["neg_premises"]) + 1)
             s[0] = 1.0
             scores.append(s)
 
         bsize = len(queries)
 
-        Q, D, s = self.tensorize_triples(queries, passages, scores, bsize, self.nway)[0]
+        Q, D, s = self.tensorize_triples(queries, passages, scores, bsize, self.nway + 1)[0]
         batch = {"queries": Q, "passages": D, "scores": s, "positive_passages": positive_passages, "contexts": queries}
         return batch
 
