@@ -141,7 +141,7 @@ class ColBERTDatasetNative(RetrievalDataset):
         is_train: bool,
     ):
         super(RetrievalDataset, self).__init__()
-        self.nway = config.num_negatives
+        self.nway = config.nway
 
         self.corpus = corpus
         self.num_negatives = config.num_negatives
@@ -167,11 +167,11 @@ class ColBERTDatasetNative(RetrievalDataset):
             passages.extend([p.serialize() for p in example["neg_premises"]])
             s = [0.0] * (len(example["neg_premises"]) + 1)
             s[0] = 1.0
-            scores.append(s)
+            scores.extend(s)
 
         bsize = len(queries)
 
-        Q, D, s = self.tensorize_triples(queries, passages, scores, bsize, self.nway + 1)[0]
+        Q, D, s = self.tensorize_triples(queries, passages, scores, bsize, self.nway)[0]
         batch = {"queries": Q, "passages": D, "scores": s, "positive_passages": positive_passages, "contexts": queries}
         return batch
 

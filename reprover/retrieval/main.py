@@ -18,12 +18,10 @@ class CLI(LightningCLI):
         for f in fields(cfg):
             if f.name == "nway":
                 parser.link_arguments(
-                    "model.config.num_negatives",
-                    "model.config.nway",
+                    "model.config.num_negatives", "model.config.nway", compute_fn=lambda source: source + 1
                 )
                 parser.link_arguments(
-                    "model.config.num_negatives",
-                    "data.config.nway",
+                    "model.config.num_negatives", "data.config.nway", compute_fn=lambda source: source + 1
                 )
                 parser.link_arguments(
                     "model.config.num_negatives",

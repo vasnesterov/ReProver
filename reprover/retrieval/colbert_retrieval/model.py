@@ -1,4 +1,5 @@
 import math
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -270,6 +271,7 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
 
     def on_validation_start(self) -> None:
         if not self.debug:
+            assert weights_are_equal(self.checkpoint, self.indexer.checkpoint), "Weights are different"
             self.reindex_corpus(self.trainer.datamodule.eval_batch_size)
         else:
             self.searcher.init_ranker()
@@ -281,7 +283,7 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
 
         # Evaluation & logging.
         recall_ats = [1, 10, self.config.num_retrieved]  # k-s to report Recall@k
-        recall = [[] for _ in recall_ats]
+        recall = defaultdict(list)
         MRR = []
         num_with_premises = 0
         text_columns_to_log = ["ground truth", "retrieved", f"Recall@{self.config.num_retrieved}"]
@@ -306,9 +308,9 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
                 num_with_premises += 1
             first_match_found = False
 
-            for j, recall_at in enumerate(recall_ats):
+            for recall_at in recall_ats:
                 TP = len(all_pos_premises.intersection(premises[:recall_at]))
-                recall[j].append(float(TP) / len(all_pos_premises))
+                recall[recall_at].append(float(TP) / len(all_pos_premises))
                 if premises[recall_at - 1] in all_pos_premises and not first_match_found:
                     MRR.append(1.0 / recall_at)
                     first_match_found = True
@@ -316,12 +318,11 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
                 MRR.append(0.0)
 
         self.logger.log_text(f"val/premises_epoch{self.current_epoch}", columns=text_columns_to_log, data=text_to_log)
-        recall = [100 * np.mean(_) for _ in recall]
 
-        for recall_at, recall_val in zip_strict(recall_ats, recall):
+        for recall_at, recall_val in recall.items():
             self.log(
                 f"val/Recall@{recall_at}",
-                recall_val,
+                np.mean(recall_val),
                 on_epoch=True,
                 sync_dist=True,
                 batch_size=num_with_premises,
@@ -329,3 +330,13 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
             )
 
         self.log("val/MRR", np.mean(MRR), on_epoch=True, sync_dist=True, batch_size=num_with_premises, prog_bar=True)
+
+
+def weights_are_equal(left, right, eps=1e-8):
+    with torch.no_grad():
+        for (name_left, p_left), (name_right, p_right) in zip(left.named_parameters(), right.named_parameters()):
+            if name_left != name_right:
+                return False
+            if not torch.allclose(p_left, p_right):
+                return False
+    return True
