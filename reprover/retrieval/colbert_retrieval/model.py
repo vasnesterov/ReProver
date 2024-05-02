@@ -331,6 +331,17 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
 
         self.log("val/MRR", np.mean(MRR), on_epoch=True, sync_dist=True, batch_size=num_with_premises, prog_bar=True)
 
+    def on_fit_start(self) -> None:
+        if self.logger is not None:
+            hparams = self.config.__dict__
+            hparams.pop("assigned")
+            self.logger.log_hyperparams(hparams)
+
+        if hasattr(self.trainer.datamodule, "corpus"):
+            self.corpus = self.trainer.datamodule.corpus
+        self.corpus_embeddings = None
+        self.embeddings_staled = True
+
 
 def weights_are_equal(left, right, eps=1e-8):
     with torch.no_grad():
