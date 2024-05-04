@@ -12,6 +12,7 @@ from reprover.retrieval.base_model import BasePremiseRetriever, PremiseRetriever
 from reprover.retrieval.colbert_retrieval.checkpoint import TrainingCheckpoint
 from reprover.retrieval.colbert_retrieval.indexer import ColBERTIndexer
 from reprover.retrieval.colbert_retrieval.searcher import TrainingSearcher
+from transformers import get_linear_schedule_with_warmup
 
 torch.set_float32_matmul_precision("medium")
 
@@ -264,13 +265,12 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
 
     def training_step(self, batch) -> torch.Tensor:
         loss, metrics = self(batch)
-
-        for key, value in metrics.items():
-            self.log(f"train/{key}", value, on_epoch=True, sync_dist=True, batch_size=len(batch), prog_bar=True)
+        metrics = {f"train/{key}": val for key, val in metrics.items()}
+        self._log(metrics, batch_size=len(batch))
         return loss
 
     def on_validation_start(self) -> None:
-        if not self.debug:
+        if not self.debug and self.trainer.global_step > 0:
             assert weights_are_equal(self.checkpoint, self.indexer.checkpoint), "Weights are different"
             self.reindex_corpus(self.trainer.datamodule.eval_batch_size)
         else:
@@ -278,6 +278,9 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
 
     def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> None:
         """Retrieve premises and calculate metrics such as Recall@K and MRR."""
+        _, metrics = self(batch)
+        metrics = {f"val/{key}": val for key, val in metrics.items()}
+
         # Retrieval.
         retrieved_premises, _ = self.retrieve_from_preprocessed(batch)
 
@@ -320,27 +323,59 @@ class ColBERTPremiseRetrieverLightning(RetrievalMixin, BasePremiseRetriever, Lig
         self.logger.log_text(f"val/premises_epoch{self.current_epoch}", columns=text_columns_to_log, data=text_to_log)
 
         for recall_at, recall_val in recall.items():
-            self.log(
-                f"val/Recall@{recall_at}",
-                np.mean(recall_val),
-                on_epoch=True,
-                sync_dist=True,
-                batch_size=num_with_premises,
-                prog_bar=True,
-            )
+            metrics[f"val/Recall@{recall_at}"] = np.mean(recall_val)
 
-        self.log("val/MRR", np.mean(MRR), on_epoch=True, sync_dist=True, batch_size=num_with_premises, prog_bar=True)
+        metrics["val/MRR"] = np.mean(MRR)
+        self._log(metrics, num_with_premises)
 
     def on_fit_start(self) -> None:
         if self.logger is not None:
-            hparams = self.config.__dict__
-            hparams.pop("assigned")
+            hparams = {key: val for key, val in self.config.__dict__.items() if key != "assigned"}
             self.logger.log_hyperparams(hparams)
 
         if hasattr(self.trainer.datamodule, "corpus"):
             self.corpus = self.trainer.datamodule.corpus
         self.corpus_embeddings = None
         self.embeddings_staled = True
+
+    def _log(self, metrics, batch_size):
+        for key, val in metrics.items():
+            self.log(
+                key,
+                val,
+                batch_size=batch_size,
+                on_epoch=True,
+                sync_dist=True,
+                prog_bar=True,
+            )
+
+    def configure_optimizers(self) -> Dict[str, Any]:
+        """Return an AdamW optimizer with cosine warmup learning rate schedule."""
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, eps=1e-8)
+
+        if self.trainer.max_steps != -1:
+            max_steps = self.trainer.max_steps
+        else:
+            assert self.trainer.max_epochs is not None
+            max_steps = (
+                self.trainer.max_epochs
+                * len(self.trainer.datamodule.train_dataloader())
+                // self.trainer.accumulate_grad_batches
+            )
+
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=self.warmup_steps,
+            num_training_steps=max_steps,
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+            },
+        }
 
 
 def weights_are_equal(left, right, eps=1e-8):
