@@ -17,7 +17,7 @@ class CLI(LightningCLI):
 
 def main() -> None:
     logger.info(f"PID: {os.getpid()}")
-    cli = CLI(ColbertPremiseRetriever, RetrievalDataModule)
+    cli = CLI(PremiseRetriever, RetrievalDataModule)
     logger.info("Configuration: \n", cli.config)
 
 

@@ -21,6 +21,7 @@ from common import (
     load_checkpoint,
     zip_strict,
     cpu_checkpointing_enabled,
+    path_to_module
 )
 
 
@@ -208,6 +209,7 @@ class PremiseRetriever(pl.LightningModule):
             context_emb,
             self.num_retrieved,
         )
+        print("after get_nearest_premises")
 
         # Evaluation & logging.
         recall = [[] for _ in range(self.num_retrieved)]
@@ -348,7 +350,7 @@ class PremiseRetriever(pl.LightningModule):
 
         ctx = [
             Context(*_)
-            for _ in zip_strict(file_name, theorem_full_name, theorem_pos, state)
+            for _ in zip_strict(path_to_module(file_name), theorem_full_name, state)
         ]
         ctx_tokens = self.tokenizer(
             [_.serialize() for _ in ctx],

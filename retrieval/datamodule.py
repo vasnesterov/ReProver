@@ -4,6 +4,7 @@ import os
 import json
 import torch
 import random
+import jsonlines
 import itertools
 from tqdm import tqdm
 from loguru import logger
@@ -16,13 +17,14 @@ from transformers import AutoTokenizer
 from torch.utils.data import Dataset, DataLoader
 
 
-from common import Context, Corpus, Batch, Example, format_state, get_all_pos_premises
+from common import Premise, Context, Corpus, Batch, Example, get_all_pos_premises, load_available_premises, zip_strict, path_to_module
 
 
 class RetrievalDataset(Dataset):
     def __init__(
         self,
         data_paths: List[str],
+        available_premises_path: str,
         uses_lean4: bool,
         corpus: Corpus,
         num_negatives: int,
@@ -40,6 +42,7 @@ class RetrievalDataset(Dataset):
         self.context_tokenizer = context_tokenizer
         self.premise_tokenizer = premise_tokenizer
         self.is_train = is_train
+        self.available_premises = corpus.in_file_premises
         self.data = list(
             itertools.chain.from_iterable(self._load_data(path) for path in data_paths)
         )
@@ -48,87 +51,38 @@ class RetrievalDataset(Dataset):
         data = []
         logger.info(f"Loading data from {data_path}")
 
-        for thm in tqdm(json.load(open(data_path))):
-            file_path = thm["file_path"]
+        data = json.load(open(data_path))
+        if self.is_train:
+            data = list(filter(lambda x: len(x['premises']) > 0, data))
 
-            for i, tac in enumerate(thm["traced_tactics"]):
-                state = format_state(tac["state_before"])
-                context = Context(
-                    file_path, thm["full_name"], Pos(*thm["start"]), state
-                )
-                all_pos_premises = get_all_pos_premises(
-                    tac["annotated_tactic"], self.corpus
-                )
-
-                if self.is_train:
-                    # In training, we ignore tactics that do not have any premises.
-                    for pos_premise in all_pos_premises:
-                        data.append(
-                            {
-                                "url": thm["url"],
-                                "commit": thm["commit"],
-                                "file_path": thm["file_path"],
-                                "full_name": thm["full_name"],
-                                "start": thm["start"],
-                                "tactic_idx": i,
-                                "context": context,
-                                "pos_premise": pos_premise,
-                                "all_pos_premises": all_pos_premises,
-                            }
-                        )
-                else:
-                    data.append(
-                        {
-                            "url": thm["url"],
-                            "commit": thm["commit"],
-                            "file_path": thm["file_path"],
-                            "full_name": thm["full_name"],
-                            "start": thm["start"],
-                            "tactic_idx": i,
-                            "context": context,
-                            "all_pos_premises": all_pos_premises,
-                        }
-                    )
+        for row in data:
+            row['all_pos_premises'] = [Premise.from_dict(dct) for dct in row['premises']]
+            del row["premises"]
+        
 
         logger.info(f"Loaded {len(data)} examples.")
         return data
+
+    # def _load_available_premises(self, available_premises_path: str):
+    #     return json.load(open(available_premises_path))
 
     def __len__(self) -> int:
         return len(self.data)
 
     def __getitem__(self, idx: int) -> Example:
-        if not self.is_train:
-            return self.data[idx]
-
-        # In-file negatives + random negatives from all accessible premises.
         ex = deepcopy(self.data[idx])
-        premises_in_file = []
-        premises_outside_file = []
 
-        for p in self.corpus.get_premises(ex["context"].path):
-            if p == ex["pos_premise"]:
-                continue
-            if p.end < ex["context"].theorem_pos:
-                if ex["pos_premise"].path == ex["context"].path:
-                    premises_in_file.append(p)
-                else:
-                    premises_outside_file.append(p)
+        ex["context"] = Context(path_to_module(ex["file_path"]), ex["full_name"], ex["state"])
 
-        for p in self.corpus.transitive_dep_graph.successors(ex["context"].path):
-            if p == ex["pos_premise"].path:
-                premises_in_file += [
-                    _p for _p in self.corpus.get_premises(p) if _p != ex["pos_premise"]
-                ]
-            else:
-                premises_outside_file += self.corpus.get_premises(p)
+        if self.is_train:
+            ex["pos_premise"] = random.choice(ex["all_pos_premises"])
+            num_in_file_negatives = min(self.num_in_file_negatives, len(self.available_premises[ex["full_name"]]["inFilePremises"]))
+            ex["neg_premises"] = random.sample(
+                    self.available_premises[ex["full_name"]]["inFilePremises"], num_in_file_negatives
+                ) + random.sample(
+                    self.available_premises[ex["full_name"]]["outFilePremises"], self.num_negatives - num_in_file_negatives
+                )
 
-        num_in_file_negatives = min(len(premises_in_file), self.num_in_file_negatives)
-
-        ex["neg_premises"] = random.sample(
-            premises_in_file, num_in_file_negatives
-        ) + random.sample(
-            premises_outside_file, self.num_negatives - num_in_file_negatives
-        )
         return ex
 
     def collate(self, examples: List[Example]) -> Batch:
@@ -232,11 +186,15 @@ class RetrievalDataModule(pl.LightningDataModule):
             self.context_tokenizer.pad_token = self.context_tokenizer.unk_token
         if self.premise_tokenizer.pad_token is None:
             self.premise_tokenizer.pad_token = self.premise_tokenizer.unk_token
-        self.corpus = Corpus(corpus_path)
+        self.corpus = Corpus(
+            jsonl_path=os.path.join(corpus_path, "corpus.jsonl"),
+            dot_imports_path=os.path.join(corpus_path, "import_graph.dot"),
+            json_in_file_premises_path=os.path.join(corpus_path, "available_premises.json") ## FIXME
+        )
 
-        metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
-        repo = LeanGitRepo(**metadata["from_repo"])
-        self.uses_lean4 = repo.uses_lean4
+        # metadata = json.load(open(os.path.join(data_path, "../metadata.json")))
+        # repo = LeanGitRepo(**metadata["from_repo"])
+        self.uses_lean4 = True
 
     def prepare_data(self) -> None:
         pass
@@ -245,6 +203,7 @@ class RetrievalDataModule(pl.LightningDataModule):
         if stage in (None, "fit"):
             self.ds_train = RetrievalDataset(
                 [os.path.join(self.data_path, "train.json")],
+                os.path.join(self.data_path, "available_premises.json"),
                 self.uses_lean4,
                 self.corpus,
                 self.num_negatives,
@@ -258,6 +217,7 @@ class RetrievalDataModule(pl.LightningDataModule):
         if stage in (None, "fit", "validate"):
             self.ds_val = RetrievalDataset(
                 [os.path.join(self.data_path, "val.json")],
+                os.path.join(self.data_path, "available_premises.json"),
                 self.uses_lean4,
                 self.corpus,
                 self.num_negatives,
@@ -274,6 +234,7 @@ class RetrievalDataModule(pl.LightningDataModule):
                     os.path.join(self.data_path, f"{split}.json")
                     for split in ("train", "val", "test")
                 ],
+                os.path.join(self.data_path, "available_premises.json"),
                 self.uses_lean4,
                 self.corpus,
                 self.num_negatives,

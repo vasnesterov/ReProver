@@ -18,7 +18,6 @@ from deepspeed.ops.adam import FusedAdam, DeepSpeedCPUAdam
 from typing import Optional, List, Dict, Any, Tuple, Generator
 from pytorch_lightning.strategies.deepspeed import DeepSpeedStrategy
 
-
 Example = Dict[str, Any]
 Batch = Dict[str, Any]
 
@@ -35,21 +34,19 @@ def remove_marks(s: str) -> str:
 class Context:
     """Contexts are "queries" in our retrieval setup."""
 
-    path: str
+    module: str
     theorem_full_name: str
-    theorem_pos: Pos = field(compare=False)
     state: str
 
     def __post_init__(self) -> None:
-        assert isinstance(self.path, str)
+        assert isinstance(self.module, str)
         assert isinstance(self.theorem_full_name, str)
-        assert isinstance(self.theorem_pos, Pos)
         assert (
             isinstance(self.state, str)
-            and "⊢" in self.state
+            # and "⊢" in self.state
             and MARK_START_SYMBOL not in self.state
             and MARK_END_SYMBOL not in self.state
-        )
+        ), self.state
 
     def serialize(self) -> str:
         """Serialize the context into a string for Transformers."""
@@ -60,70 +57,79 @@ class Context:
 class Premise:
     """Premises are "documents" in our retrieval setup."""
 
-    path: str
-    """The ``*.lean`` file this premise comes from.
+    module: str
+    """The Lean Module this premise comes from.
     """
 
     full_name: str
     """Fully qualified name.
     """
 
-    start: Pos = field(repr=False)
-    """Start position of the premise's definition in the ``*.lean`` file.
-    """
-
-    end: Pos = field(repr=False, compare=False)
-    """End position of the premise's definition in the ``*.lean`` file.
-    """
-
     code: str = field(compare=False)
     """Raw, human-written code for defining the premise.
     """
 
-    def __post_init__(self) -> None:
-        assert isinstance(self.path, str)
-        assert isinstance(self.full_name, str)
-        assert (
-            isinstance(self.start, Pos)
-            and isinstance(self.end, Pos)
-            and self.start <= self.end
+    kind: str
+
+    @classmethod
+    def from_dict(cls, dct):
+        return cls(
+            module = dct['module'],
+            full_name = dct['name'],
+            code = dct['pp'],
+            kind = dct['kind'],
         )
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.module, str)
+        assert isinstance(self.full_name, str)
+        assert isinstance(self.kind, str)
         assert isinstance(self.code, str) and self.code != ""
 
     def serialize(self) -> str:
         """Serialize the premise into a string for Transformers."""
         annot_full_name = f"{MARK_START_SYMBOL}{self.full_name}{MARK_END_SYMBOL}"
         code = self.code.replace(f"_root_.{self.full_name}", annot_full_name)
-        fields = self.full_name.split(".")
+        # fields = self.full_name.split(".")
 
-        for i in range(len(fields)):
-            prefix = ".".join(fields[i:])
-            new_code = re.sub(f"(?<=\s)«?{prefix}»?", annot_full_name, code)
-            if new_code != code:
-                code = new_code
-                break
+        # for i in range(len(fields)):
+        #     prefix = ".".join(fields[i:])
+        #     new_code = re.sub(f"(?<=\s)«?{prefix}»?", annot_full_name, code)
+        #     if new_code != code:
+        #         code = new_code
+        #         break
 
         return code
 
+def load_available_premises(json_path):
+    data = json.load(open(json_path))
+
+    result = dict()
+    for key in data:
+        result[key] = {
+            'inFilePremises': [Premise.from_dict(dct) for dct in data[key]['inFilePremises']],
+            'outFilePremises': [Premise.from_dict(dct) for dct in data[key]['outFilePremises']]
+        }
+    return result
 
 class PremiseSet:
-    """A set of premises indexed by their paths and full names."""
+    """A set of premises indexed by their modules and full names."""
 
-    path2premises: Dict[str, Dict[str, Premise]]
+    module2premises: Dict[str, Dict[str, Premise]]
 
     def __init__(self) -> None:
-        self.path2premises = {}
+        self.module2premises = {}
 
     def __iter__(self) -> Generator[Premise, None, None]:
-        for _, premises in self.path2premises.items():
+        for _, premises in self.module2premises.items():
             for p in premises.values():
                 yield p
 
     def add(self, p: Premise) -> None:
-        if p.path in self.path2premises:
-            self.path2premises[p.path][p.full_name] = p
+        if p.module in self.module2premises:
+            self.module2premises[p.module][p.full_name] = p
         else:
-            self.path2premises[p.path] = {p.full_name: p}
+            self.module2premises[p.module] = {p.full_name: p}
 
     def update(self, premises: List[Premise]) -> None:
         for p in premises:
@@ -131,50 +137,28 @@ class PremiseSet:
 
     def __contains__(self, p: Premise) -> bool:
         return (
-            p.path in self.path2premises and p.full_name in self.path2premises[p.path]
+            p.module in self.module2premises and p.full_name in self.module2premises[p.module]
         )
 
     def __len__(self) -> int:
-        return sum(len(premises) for premises in self.path2premises.values())
+        return sum(len(premises) for premises in self.module2premises.values())
 
 
 @dataclass(frozen=True)
-class File:
-    """A file defines 0 or multiple premises."""
+class Module:
+    """A module defines 0 or multiple premises."""
 
-    path: str
-    """Path of the ``*.lean`` file.
+    name: str
+    """Name of module
     """
 
     premises: List[Premise]
     """A list of premises defined in this file.
     """
 
-    @classmethod
-    def from_data(cls, file_data: Dict[str, Any]) -> "File":
-        """Construct a :class:`File` object from ``file_data``."""
-        path = file_data["path"]
-        premises = []
-        for p in file_data["premises"]:
-            full_name = p["full_name"]
-            if full_name is None:
-                continue
-            if "user__.n" in full_name or p["code"] == "":
-                # Ignore ill-formed premises (often due to errors in ASTs).
-                continue
-            if full_name.startswith("[") and full_name.endswith("]"):
-                # Ignore mutual definitions.
-                continue
-            premises.append(
-                Premise(
-                    path, p["full_name"], Pos(*p["start"]), Pos(*p["end"]), p["code"]
-                )
-            )
-        return cls(path, premises)
-
     @property
     def is_empty(self) -> bool:
-        """Check whether the file contains no premise."""
+        """Check whether the module contains no premise."""
         return self.premises == []
 
 
@@ -192,25 +176,41 @@ class Corpus:
     """All premises in the entire corpus.
     """
 
-    def __init__(self, jsonl_path: str) -> None:
+    
+
+    def __init__(self, jsonl_path: str, dot_imports_path: str, json_in_file_premises_path: str) -> None:
         """Construct a :class:`Corpus` object from a ``corpus.jsonl`` data file."""
-        dep_graph = nx.DiGraph()
+        dep_graph = self._load_digraph_from_dot(dot_imports_path)
+        self.in_file_premises = load_available_premises(json_in_file_premises_path)
         self.all_premises = []
 
         logger.info(f"Building the corpus from {jsonl_path}")
 
+        mod2premises = dict()
+
         for line in open(jsonl_path):
-            file_data = json.loads(line)
-            path = file_data["path"]
-            assert not dep_graph.has_node(path)
-            file = File.from_data(file_data)
+            premise_data = json.loads(line)
+            module = premise_data['module']
+            premise = Premise(
+                module=module,
+                kind=premise_data['kind'],
+                full_name=premise_data['name'],
+                code=premise_data['pp']
+            )
+            self.all_premises.append(premise)
+            if module not in mod2premises:
+                mod2premises[module] = []
+            mod2premises[module].append(premise)
 
-            dep_graph.add_node(path, file=file)
-            self.all_premises.extend(file.premises)
-
-            for p in file_data["imports"]:
-                assert dep_graph.has_node(p)
-                dep_graph.add_edge(path, p)
+        self.module_names = []
+        for mod_name in dep_graph.nodes:
+            module = Module(
+                name=mod_name,
+                premises=mod2premises[mod_name] if mod_name in mod2premises else []
+            )
+            # print(f"{mod_name}: {len(mod2premises[mod_name] if mod_name in mod2premises else [])} premises")
+            dep_graph.nodes[mod_name]['module'] = module
+            self.module_names.append(module)
 
         assert nx.is_directed_acyclic_graph(dep_graph)
         self.transitive_dep_graph = nx.transitive_closure_dag(dep_graph)
@@ -218,8 +218,21 @@ class Corpus:
         self.imported_premises_cache = {}
         self.fill_cache()
 
-    def _get_file(self, path: str) -> File:
-        return self.transitive_dep_graph.nodes[path]["file"]
+    def _load_digraph_from_dot(self, dot_file_path: str):
+        digraph = nx.DiGraph()
+        
+        with open(dot_file_path, 'r') as dot_file:
+            for line in dot_file:
+                if '->' in line:
+                    nodes = line.strip().split('->')
+                    source = nodes[0].strip().strip('"')
+                    target = nodes[1].strip().rstrip(';').strip('"')  # Remove trailing semicolon
+                    digraph.add_edge(source, target)
+        
+        return digraph.reverse()
+
+    def _get_module(self, name: str) -> Module:
+        return self.transitive_dep_graph.nodes[name]["module"]
 
     def __len__(self) -> int:
         return len(self.all_premises)
@@ -231,69 +244,69 @@ class Corpus:
         return self.all_premises[idx]
 
     @property
-    def files(self) -> List[File]:
-        return [self._get_file(p) for p in self.transitive_dep_graph.nodes]
+    def modules(self) -> List[Module]:
+        return [self._get_module(p) for p in self.transitive_dep_graph.nodes]
 
     @property
-    def num_files(self) -> int:
-        return len(self.files)
+    def num_modules(self) -> int:
+        return len(self.module_names)
 
-    def get_dependencies(self, path: str) -> List[str]:
-        """Return a list of (direct and indirect) dependencies of the file ``path``."""
-        return list(self.transitive_dep_graph.successors(path))
+    def get_dependencies(self, module: str) -> List[str]:
+        """Return a list of (direct and indirect) dependencies of the ``module``."""
+        return list(self.transitive_dep_graph.successors(module))
 
-    def get_premises(self, path: str) -> List[Premise]:
-        """Return a list of premises defined in the file ``path``."""
-        return self._get_file(path).premises
+    def get_premises(self, module: str) -> List[Premise]:
+        """Return a list of premises defined in the``module``."""
+        return self._get_module(module).premises
 
-    def num_premises(self, path: str) -> int:
-        """Return the number of premises defined in the file ``path``."""
+    def num_premises(self, module: str) -> int:
+        """Return the number of premises defined in the ``module``."""
         return len(self.get_premises(path))
 
-    def locate_premise(self, path: str, pos: Pos) -> Optional[Premise]:
-        """Return a premise at position ``pos`` in file ``path``.
+    # def locate_premise(self, path: str, pos: Pos) -> Optional[Premise]:
+    #     """Return a premise at position ``pos`` in file ``path``.
 
-        Return None if no such premise can be found.
-        """
-        for p in self.get_premises(path):
-            assert p.path == path
-            if p.start <= pos <= p.end:
-                return p
-        return None
+    #     Return None if no such premise can be found.
+    #     """
+    #     for p in self.get_premises(path):
+    #         assert p.path == path
+    #         if p.start <= pos <= p.end:
+    #             return p
+    #     return None
 
     def fill_cache(self) -> None:
         for path in self.transitive_dep_graph.nodes:
-            self._get_imported_premises(path)
+            self.get_imported_premises(path)
 
-    def _get_imported_premises(self, path: str) -> List[Premise]:
-        """Return a list of premises imported in file ``path``. The result is cached."""
-        premises = self.imported_premises_cache.get(path, None)
+    def get_imported_premises(self, module: str) -> List[Premise]:
+        """Return a list of premises imported in ``module``. The result is cached."""
+        premises = self.imported_premises_cache.get(module, None)
         if premises is not None:
             return premises
 
         premises = []
-        for p in self.transitive_dep_graph.successors(path):
-            premises.extend(self._get_file(p).premises)
-        self.imported_premises_cache[path] = premises
+        for m in self.transitive_dep_graph.successors(module):
+            # print(f"{module} -> {m}")
+            premises.extend(self._get_module(m).premises)
+        self.imported_premises_cache[module] = premises
         return premises
 
-    def get_accessible_premises(self, path: str, pos: Pos) -> PremiseSet:
-        """Return the set of premises accessible at position ``pos`` in file ``path``,
-        i.e., all premises defined in the (transitively) imported files or earlier in the same file.
-        """
-        premises = PremiseSet()
-        for p in self.get_premises(path):
-            if p.end <= pos:
-                premises.add(p)
-        premises.update(self._get_imported_premises(path))
-        return premises
+    # def get_accessible_premises(self, path: str, pos: Pos) -> PremiseSet:
+    #     """Return the set of premises accessible at position ``pos`` in file ``path``,
+    #     i.e., all premises defined in the (transitively) imported files or earlier in the same file.
+    #     """
+    #     premises = PremiseSet()
+    #     for p in self.get_premises(path):
+    #         if p.end <= pos:
+    #             premises.add(p)
+    #     premises.update(self.get_imported_premises(path))
+    #     return premises
 
-    def get_accessible_premise_indexes(self, path: str, pos: Pos) -> List[int]:
+    def get_imported_premise_indexes(self, module: str, pos: Pos) -> List[int]:
         return [
             i
             for i, p in enumerate(self.all_premises)
-            if (p.path == path and p.end <= pos)
-            or self.transitive_dep_graph.has_edge(path, p.path)
+            if self.transitive_dep_graph.has_edge(module, p.module)
         ]
 
     def get_nearest_premises(
@@ -312,17 +325,19 @@ class Corpus:
         scores = [[] for _ in batch_context]
 
         for j, (ctx, idxs) in enumerate(zip(batch_context, idxs_batch)):
-            accessible_premises = self.get_accessible_premises(
-                ctx.path, ctx.theorem_pos
-            )
+            accessible_premises = set(self.get_imported_premises(ctx.module) + self.in_file_premises[ctx.theorem_full_name]["inFilePremises"])
             for i in idxs:
                 p = self.all_premises[i]
                 if p in accessible_premises:
                     results[j].append(p)
                     scores[j].append(similarities[j, i].item())
                     if len(results[j]) >= k:
+                        
                         break
             else:
+                print(ctx.module, ctx.theorem_full_name)
+                print(len(accessible_premises))
+                print(len(self.get_imported_premises(ctx.module)))
                 raise ValueError
 
         return results, scores
@@ -339,6 +354,18 @@ class IndexedCorpus:
         assert self.embeddings.device == torch.device("cpu")
         assert len(self.embeddings) == len(self.corpus)
 
+def path_to_module(path: str) -> str:
+    path = re.sub(r".lake/packages/\w*?/", "/", path)
+    normalized_path = os.path.normpath(path)
+    
+    parts = []
+    for part in normalized_path.split(os.path.sep):
+        if part and part != "." and part != "..":
+            parts.append(part)    
+
+    assert parts[-1].endswith(".lean")
+    parts[-1] = parts[-1].replace(".lean", "")
+    return ".".join(parts)
 
 def get_all_pos_premises(annot_tac, corpus: Corpus) -> List[Premise]:
     """Return a list of all premises that are used in the tactic ``annot_tac``."""
