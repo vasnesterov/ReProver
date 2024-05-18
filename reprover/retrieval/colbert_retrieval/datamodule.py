@@ -8,9 +8,8 @@ from colbert.data.collection import Collection
 from colbert.data.examples import Examples
 from colbert.data.queries import Queries
 from colbert.infra.config import ColBERTConfig
-from colbert.infra.config.config import ColBERTConfig
 from colbert.modeling.tokenization import DocTokenizer, QueryTokenizer, tensorize_triples
-from colbert.utils.utils import zipstar
+from datasets import Dataset as HFDataset
 from jsonargparse.typing import Path_fr, path_type
 from reprover.common import Corpus
 from reprover.retrieval.datamodule import RetrievalDataset
@@ -35,18 +34,120 @@ class ColBERTDataset(Dataset):
         return len(self.triples)
 
     def __getitem__(self, i):
-        query, *pids = self.triples[i]
-        pids = pids[: self.nway]
+        qid, pid, nid = self.triples[i]
+        query = self.queries[qid]
 
-        query = self.queries[query]
+        scores = [1.0, 0.0]
+        passages = [self.collection[pid], self.collectoin[nid]]
+        return query, passages, scores
 
-        try:
-            pids, scores = zipstar(pids)
-        except:
-            scores = []
+    def collate(self, inputs):
+        queries, passages, scores = zip(*inputs)
 
-        passages = [self.collection[pid] for pid in pids]
+        positive_passages = [[p[0]] for p in passages]
+        bsize = len(queries)
+        passages = list(chain(*passages))
 
+        Q, D, s = self.tensorize_triples(queries, passages, scores, bsize, 2)[0]
+        batch = {"queries": Q, "passages": D, "scores": s, "positive_passages": positive_passages, "contexts": queries}
+        return batch
+
+
+class ColBERTDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        config: ColBERTConfig,
+        data_dir: Path_dr | str,
+        batch_size: int,
+        eval_batch_size: int,
+        num_workers: int,
+    ) -> None:
+        super().__init__()
+        self.config = config
+        self.data_dir = Path(data_dir)
+        self.batch_size = batch_size
+        self.eval_batch_size = eval_batch_size
+        self.num_workers = num_workers
+        self.config.configure(bsize=batch_size)
+
+    def prepare_data(self) -> None:
+        pass
+
+    def setup(self, stage: Optional[str] = None) -> None:
+        collection = self.data_dir / "collection.tsv"
+        if stage in (None, "fit", "validate"):
+            self.ds_train = ColBERTDataset(
+                self.config, self.data_dir / "triples_train.json", self.data_dir / "queries_train.json", collection
+            )
+
+        if stage in (None, "fit", "validate"):
+            self.ds_val = ColBERTDataset(
+                self.config, self.data_dir / "triples_val.json", self.data_dir / "queries_val.json", collection
+            )
+
+        if stage in (None, "fit", "predict"):
+            self.ds_pred = ColBERTDataset(
+                self.config, self.data_dir / "triples.json", self.data_dir / "queries.json", collection
+            )
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            self.ds_train,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            collate_fn=self.ds_train.collate,
+            shuffle=True,
+            # pin_memory=True,
+            persistent_workers=True,
+            drop_last=True,
+        )
+
+    def val_dataloader(self) -> DataLoader:
+        return DataLoader(
+            self.ds_val,
+            batch_size=self.eval_batch_size,
+            num_workers=self.num_workers,
+            collate_fn=self.ds_val.collate,
+            shuffle=False,
+            # pin_memory=True,
+            persistent_workers=True,
+            drop_last=False,
+        )
+
+    def predict_dataloader(self) -> DataLoader:
+        return DataLoader(
+            self.ds_pred,
+            batch_size=self.eval_batch_size,
+            num_workers=self.num_workers,
+            collate_fn=self.ds_pred.collate,
+            shuffle=False,
+            # pin_memory=True,
+            persistent_workers=True,
+            drop_last=False,
+        )
+
+
+class ColBERTMSMARCODataset(Dataset):
+    def __init__(self, config: ColBERTConfig, triples: Path | str, queries: Path | str, collection: Path | str):
+        self.nway = 2
+
+        self.query_tokenizer = QueryTokenizer(config)
+        self.doc_tokenizer = DocTokenizer(config)
+        self.tensorize_triples = partial(tensorize_triples, self.query_tokenizer, self.doc_tokenizer)
+
+        self.triples = HFDataset.load_from_disk(str(triples))
+        self.queries = Queries.cast(str(queries))
+        self.collection = Collection.cast(collection)
+
+    def __len__(self):
+        return len(self.triples)
+
+    def __getitem__(self, i):
+        triple = self.triples[i]
+        query = self.queries[triple["qid"]]
+
+        scores = [1.0, 0.0]
+        passages = [self.collection[triple["pos_pid"]], self.collection[triple["neg_pid"]]]
         return query, passages, scores
 
     def collate(self, inputs):
@@ -61,53 +162,24 @@ class ColBERTDataset(Dataset):
         return batch
 
 
-class ColBERTDataModule(pl.LightningDataModule):
-    def __init__(
-        self,
-        config: ColBERTConfig,
-        data_path: str,
-        batch_size: int,
-        eval_batch_size: int,
-        num_workers: int,
-    ) -> None:
-        super().__init__()
-        self.config = config
-        self.data_path = Path(data_path)
-        self.batch_size = batch_size
-        self.eval_batch_size = eval_batch_size
-        self.num_workers = num_workers
-        self.config.configure(bsize=batch_size)
-
-    def prepare_data(self) -> None:
-        pass
-
+class ColBERTMSMARCODataModule(ColBERTDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
-        collection = self.data_path / "collection.tsv"
+        collection = Collection.cast(self.config.collection)
         if stage in (None, "fit", "validate"):
-            self.ds_train = ColBERTDataset(
-                self.config, self.data_path / "triples_train.json", self.data_path / "queries_train.json", collection
+            self.ds_train = ColBERTMSMARCODataset(
+                self.config,
+                self.data_dir / "train",
+                self.data_dir.parent / "queries.train.tsv",
+                collection,
             )
 
         if stage in (None, "fit", "validate"):
-            self.ds_val = ColBERTDataset(
-                self.config, self.data_path / "triples_val.json", self.data_path / "queries_val.json", collection
+            self.ds_val = ColBERTMSMARCODataset(
+                self.config,
+                self.data_dir / "val",
+                self.data_dir.parent / "queries.train.tsv",
+                collection,
             )
-
-        if stage in (None, "fit", "predict"):
-            self.ds_pred = ColBERTDataset(
-                self.config, self.data_path / "triples.json", self.data_path / "queries.json", collection
-            )
-
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.ds_train,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            collate_fn=self.ds_train.collate,
-            shuffle=True,
-            # pin_memory=True,
-            drop_last=True,
-        )
 
     def val_dataloader(self) -> DataLoader:
         return DataLoader(
@@ -115,19 +187,9 @@ class ColBERTDataModule(pl.LightningDataModule):
             batch_size=self.eval_batch_size,
             num_workers=self.num_workers,
             collate_fn=self.ds_val.collate,
-            shuffle=False,
+            shuffle=True,
             # pin_memory=True,
-            drop_last=False,
-        )
-
-    def predict_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.ds_pred,
-            batch_size=self.eval_batch_size,
-            num_workers=self.num_workers,
-            collate_fn=self.ds_pred.collate,
-            shuffle=False,
-            # pin_memory=True,
+            persistent_workers=True,
             drop_last=False,
         )
 
@@ -156,7 +218,6 @@ class ColBERTDatasetNative(RetrievalDataset):
         self.tensorize_triples = partial(tensorize_triples, self.context_tokenizer, self.premise_tokenizer)
 
     def collate(self, inputs):
-
         queries, passages, scores = [], [], []
         positive_passages = []
         for example in inputs:
@@ -270,14 +331,31 @@ class ColBERTDataModuleNative(pl.LightningDataModule):
         )
 
 
+def _iteration_time(cfg, kwargs, n_iters=100):
+    datamodule = ColBERTDataModuleNative(cfg, **kwargs)
+    datamodule.setup()
+    loader = datamodule.train_dataloader()
+    import time
+
+    s = time.time()
+    i = 0
+    for batch in loader:
+        i += 1
+        if i == n_iters:
+            break
+    s = time.time() - s
+
+    print(f"Average iteration time: {s / 100:.3f} seconds")
+
+
 if __name__ == "__main__":
     cfg = ColBERTConfig()
     cfg.checkpoint = "microsoft/deberta-v3-xsmall"  # "kaiyuy/leandojo-lean4-retriever-byt5-small"
     cfg.root = Path(cfg.root) / "../experiments"
     cfg.query_maxlen = 128
     cfg.doc_maxlen = 180
-    cfg.num_negatives = 7
-    cfg.num_in_file_negatives = 3
+    cfg.num_negatives = 2
+    cfg.num_in_file_negatives = 1
 
     datamodule = ColBERTDataModuleNative(
         cfg,
@@ -288,20 +366,21 @@ if __name__ == "__main__":
         num_workers=1,
     )
 
-    # datamodule.save_datasets()
+    # # datamodule.save_datasets()
+    # cfg.num_negatives = 23
+    # batch_size = 2
+    # print(f"nway: {cfg.num_negatives}, bs: {batch_size}")
+    # kwargs = dict(
+    #     corpus_path="/home/yeahrmek/github/theorem_proving/ReProver/data/leandojo_benchmark_4/corpus.jsonl",
+    #     data_dir="/home/yeahrmek/github/theorem_proving/ReProver/data/leandojo_benchmark_4/random/",
+    #     batch_size=batch_size,
+    #     eval_batch_size=128,
+    #     num_workers=1,
+    # )
+    # _iteration_time(cfg, kwargs, n_iters=100)
+    # print()
 
-    datamodule.setup()
-    loader = datamodule.train_dataloader()
-    import time
-
-    s = time.time()
-    for batch in loader:
-        pass
-
-    print(time.time() - s)
-
-    loader = datamodule.val_dataloader()
-    s = time.time()
-    for batch in loader:
-        pass
-    print(time.time() - s)
+    cfg.num_negatives = 2
+    kwargs["batch_size"] = 48
+    print(f"nway: {cfg.num_negatives}, bs: {batch_size}")
+    _iteration_time(cfg, kwargs, n_iters=100)

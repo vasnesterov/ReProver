@@ -28,7 +28,8 @@ trainer:
         save_last: true
         monitor: val/Recall@10
         mode: max
-  check_val_every_n_epoch: 2
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: 0
 
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
@@ -37,12 +38,12 @@ trainer:
 
 model:
   config:
-    checkpoint: microsoft/deberta-v3-xsmall # kaiyuy/leandojo-lean4-retriever-byt5-small
+    checkpoint: microsoft/deberta-v3-xsmall  # kaiyuy/leandojo-lean4-retriever-byt5-small
     collection: ../../../data/leandojo_benchmark_4/random/collection.tsv
-    index_name: colbert_v1.1
+    index_name: reprover
     experiment: lean
     root: ../../../experiments/
-    warmup: 20000
+    warmup: 10000  # 20000
     lr: 1e-5
     num_retrieved: 100
     n_log_premises: 10
@@ -51,16 +52,18 @@ model:
     mask_punctuation: false
     debug: false
     ignore_scores: true
-    num_negatives: 8
-    num_in_file_negatives: 4
+    num_negatives: 1
+    num_in_file_negatives: 1
     nway: -1
 
-    nbits: 2
+    # nprobe: 2
+    # ncandidates: 8192
+    nbits: 1
     kmeans_niters: 20
     resume: false
     similarity: cosine
     relu: false
-    use_ib_negatives: true
+    use_ib_negatives: false
     drop_duplciate_passages: false
     reranker: false
     distillation_alpha: 1.0
@@ -72,6 +75,6 @@ model:
 data:
   corpus_path: ../../../data/leandojo_benchmark_4/corpus.jsonl
   data_dir: data/leandojo_benchmark_4/random/
-  batch_size: 16  # training batch size
-  eval_batch_size: 80 # the batch size will be used for corpus reindexing
-  num_workers: 0
+  batch_size: 24  # training batch size
+  eval_batch_size: 128 # the batch size will be used for corpus reindexing
+  num_workers: 4
