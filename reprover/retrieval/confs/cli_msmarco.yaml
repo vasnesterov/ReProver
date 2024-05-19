@@ -27,13 +27,11 @@ trainer:
         save_last: true
         monitor: val/Recall@10
         mode: max
-        save_on_train_epoch_end: true
-        every_n_epochs: 1
-
   # max_steps: 200000
-  max_epochs: 16
+  max_epochs: 2
   # check_val_every_n_epoch: 1
-  check_val_every_n_epoch: 8
+  check_val_every_n_epoch: 2
+  limit_val_batches: 5000
   num_sanity_val_steps: 0
 
   logger:
@@ -43,26 +41,27 @@ trainer:
 
 model:
   config:
-    checkpoint: microsoft/deberta-v3-xsmall  # kaiyuy/leandojo-lean4-retriever-byt5-small
-    collection: ../../../data/leandojo_benchmark_4/random/collection.tsv
-    index_name: reprover
-    experiment: lean
+    checkpoint: bert-base-uncased
+    collection: ../../../data/msmarco/collection_small.hf
+    index_name: bert
+    experiment: msmarco
     root: ../../../experiments/
-    warmup: 2000  # 20000
+    warmup: 10000  # 20000
     lr: 1e-5
     num_retrieved: 100
     n_log_premises: 10
-    query_maxlen: 128
+    query_maxlen: 96
     doc_maxlen: 180
     mask_punctuation: false
     debug: false
     ignore_scores: true
     num_negatives: 1
-    num_in_file_negatives: null
+    num_in_file_negatives: 1
     nway: -1
 
     # nprobe: 2
     # ncandidates: 8192
+    index_bsize: 128
     nbits: 1
     kmeans_niters: 20
     resume: false
@@ -78,8 +77,7 @@ model:
     overwrite: false
 
 data:
-  corpus_path: ../../../data/leandojo_benchmark_4/corpus.jsonl
-  data_dir: data/leandojo_benchmark_4/random/
-  batch_size: 28  # training batch size
-  eval_batch_size: 128 # the batch size will be used for corpus reindexing
+  data_dir: ../../../data/msmarco/triples_small.hf
+  batch_size: 24  # training batch size
+  eval_batch_size: 200 # the batch size will be used for corpus reindexing
   num_workers: 1

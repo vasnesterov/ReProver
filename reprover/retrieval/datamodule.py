@@ -24,7 +24,7 @@ class RetrievalDataset(Dataset):
         data_paths: List[str],
         corpus: Corpus,
         num_negatives: int,
-        num_in_file_negatives: int,
+        num_in_file_negatives: Optional[int],
         max_seq_len: int,
         context_tokenizer,
         premise_tokenizer,
@@ -121,11 +121,14 @@ class RetrievalDataset(Dataset):
             else:
                 premises_outside_file += self.corpus.get_premises(p)
 
-        num_in_file_negatives = min(len(premises_in_file), self.num_in_file_negatives)
+        if self.num_in_file_negatives is not None:
+            num_in_file_negatives = min(len(premises_in_file), self.num_in_file_negatives)
+            ex["neg_premises"] = random.sample(premises_in_file, num_in_file_negatives) + random.sample(
+                premises_outside_file, self.num_negatives - num_in_file_negatives
+            )
+        else:
+            ex["neg_premises"] = random.sample(premises_in_file + premises_outside_file, self.num_negatives)
 
-        ex["neg_premises"] = random.sample(premises_in_file, num_in_file_negatives) + random.sample(
-            premises_outside_file, self.num_negatives - num_in_file_negatives
-        )
         return ex
 
     def collate(self, examples: List[Example]) -> Batch:
