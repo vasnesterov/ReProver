@@ -33,7 +33,7 @@ class TrainingSearcher(Searcher):
         copy_essential_config(config, self.config)
 
         self.collection = Collection.cast(self.config.collection)
-        self.configure(checkpoint=self.checkpoint.name, collection=self.collection)
+        self.configure(checkpoint=self.checkpoint.name, collection=self.config.collection)
 
         load_index_with_mmap = self.config.load_index_with_mmap
 

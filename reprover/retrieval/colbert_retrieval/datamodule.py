@@ -279,6 +279,7 @@ class ColBERTDataModuleNative(pl.LightningDataModule):
             if (self.data_dir / "train.ckpt").exists():
                 data_path_list = [self.data_dir / "train.ckpt"]
             else:
+                self.save_datasets()
                 data_path_list = [self.data_dir / "train.json"]
 
             self.ds_train = ColBERTDatasetNative(self.config, self.corpus, data_path_list, is_train=True)
@@ -287,6 +288,7 @@ class ColBERTDataModuleNative(pl.LightningDataModule):
             if (self.data_dir / "val.ckpt").exists():
                 data_path_list = [self.data_dir / "val.ckpt"]
             else:
+                self.save_datasets()
                 data_path_list = [self.data_dir / "val.json"]
             self.ds_val = ColBERTDatasetNative(self.config, self.corpus, data_path_list, is_train=True)
 
@@ -294,6 +296,7 @@ class ColBERTDataModuleNative(pl.LightningDataModule):
             if (self.data_dir / "test.ckpt").exists():
                 data_path_list = [self.data_dir / "test.ckpt"]
             else:
+                self.save_datasets()
                 data_path_list = [self.data_dir / f"{split}.json" for split in ["train", "val", "test"]]
             self.ds_pred = ColBERTDatasetNative(self.config, self.corpus, data_path_list, is_train=False)
 
