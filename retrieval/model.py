@@ -60,15 +60,19 @@ class PremiseRetriever(pl.LightningModule):
             return
 
         path = path_or_corpus
-        if path.endswith(".jsonl"):  # A raw corpus without embeddings.
-            self.corpus = Corpus(path)
-            self.corpus_embeddings = None
-            self.embeddings_staled = True
-        else:  # A corpus with pre-computed embeddings.
+        if path.endswith(".pickle"):  # A corpus with pre-computed embeddings.
             indexed_corpus = pickle.load(open(path, "rb"))
             self.corpus = indexed_corpus.corpus
             self.corpus_embeddings = indexed_corpus.embeddings
             self.embeddings_staled = False
+        else:  # A raw corpus without embeddings.
+            self.corpus = Corpus(
+                jsonl_path=os.path.join(path, "corpus.jsonl"),
+                dot_imports_path=os.path.join(path, "import_graph.dot"),
+                json_in_file_premises_path=os.path.join(path, "available_premises.json") ## FIXME
+            )
+            self.corpus_embeddings = None
+            self.embeddings_staled = True
 
     @property
     def embedding_size(self) -> int:
@@ -122,6 +126,7 @@ class PremiseRetriever(pl.LightningModule):
         # Cosine similarities for unit-norm vectors are just inner products.
         similarity = torch.mm(context_emb, all_premise_embs.t())
         assert -1 <= similarity.min() <= similarity.max() <= 1
+        similarity = torch.clamp(similarity, min=0, max=1) # our labels are 0 and 1, we don't punish for negative values for negative premises
         loss = F.mse_loss(similarity, label)
         return loss
 
@@ -209,7 +214,6 @@ class PremiseRetriever(pl.LightningModule):
             context_emb,
             self.num_retrieved,
         )
-        print("after get_nearest_premises")
 
         # Evaluation & logging.
         recall = [[] for _ in range(self.num_retrieved)]
@@ -244,7 +248,7 @@ class PremiseRetriever(pl.LightningModule):
             for j in range(self.num_retrieved):
                 TP = len(all_pos_premises.intersection(premises[: (j + 1)]))
                 recall[j].append(float(TP) / len(all_pos_premises))
-                if premises[j] in all_pos_premises and not first_match_found:
+                if j < len(premises) and premises[j] in all_pos_premises and not first_match_found:
                     MRR.append(1.0 / (j + 1))
                     first_match_found = True
             if not first_match_found:
@@ -295,8 +299,8 @@ class PremiseRetriever(pl.LightningModule):
             commit,
             file_path,
             full_name,
-            start,
-            tactic_idx,
+            # start,
+            # tactic_idx,
             ctx,
             pos_premises,
             premises,
@@ -306,8 +310,8 @@ class PremiseRetriever(pl.LightningModule):
             batch["commit"],
             batch["file_path"],
             batch["full_name"],
-            batch["start"],
-            batch["tactic_idx"],
+            # batch["start"],
+            # batch["tactic_idx"],
             batch["context"],
             batch["all_pos_premises"],
             retrieved_premises,
@@ -319,8 +323,8 @@ class PremiseRetriever(pl.LightningModule):
                     "commit": commit,
                     "file_path": file_path,
                     "full_name": full_name,
-                    "start": start,
-                    "tactic_idx": tactic_idx,
+                    # "start": start,
+                    # "tactic_idx": tactic_idx,
                     "context": ctx,
                     "all_pos_premises": pos_premises,
                     "retrieved_premises": premises,
@@ -342,15 +346,16 @@ class PremiseRetriever(pl.LightningModule):
         state: List[str],
         file_name: List[str],
         theorem_full_name: List[str],
-        theorem_pos: List[Pos],
         k: int,
     ) -> Tuple[List[Premise], List[float]]:
         """Retrieve ``k`` premises from ``corpus`` using ``state`` and ``tactic_prefix`` as context."""
+        logger.info(f"RETRIEVE BEGIN")
         self.reindex_corpus(batch_size=32)
 
+        
         ctx = [
             Context(*_)
-            for _ in zip_strict(path_to_module(file_name), theorem_full_name, state)
+            for _ in zip_strict(list(map(path_to_module, file_name)), theorem_full_name, state)
         ]
         ctx_tokens = self.tokenizer(
             [_.serialize() for _ in ctx],
@@ -375,4 +380,5 @@ class PremiseRetriever(pl.LightningModule):
             context_emb,
             k,
         )
+        logger.info(f"RETRIEVE END")
         return retrieved_premises, scores

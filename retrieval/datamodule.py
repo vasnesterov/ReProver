@@ -130,7 +130,7 @@ class RetrievalDataset(Dataset):
                         ]
                     label[j, k] = float(pos_premise_k in all_pos_premises)
 
-            batch["label"] = label
+            batch["label"] = label # {0, 1} -> {-1, 1}
             batch["neg_premises"] = []
             batch["neg_premises_ids"] = []
             batch["neg_premises_mask"] = []
@@ -200,19 +200,19 @@ class RetrievalDataModule(pl.LightningDataModule):
         pass
 
     def setup(self, stage: Optional[str] = None) -> None:
-        if stage in (None, "fit"):
-            self.ds_train = RetrievalDataset(
-                [os.path.join(self.data_path, "train.json")],
-                os.path.join(self.data_path, "available_premises.json"),
-                self.uses_lean4,
-                self.corpus,
-                self.num_negatives,
-                self.num_in_file_negatives,
-                self.max_seq_len,
-                self.context_tokenizer,
-                self.premise_tokenizer,
-                is_train=True,
-            )
+        # if stage in (None, "fit"):
+        self.ds_train = RetrievalDataset(
+            [os.path.join(self.data_path, "train.json")],
+            os.path.join(self.data_path, "available_premises.json"),
+            self.uses_lean4,
+            self.corpus,
+            self.num_negatives,
+            self.num_in_file_negatives,
+            self.max_seq_len,
+            self.context_tokenizer,
+            self.premise_tokenizer,
+            is_train=True,
+        )
 
         if stage in (None, "fit", "validate"):
             self.ds_val = RetrievalDataset(

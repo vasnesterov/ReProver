@@ -305,7 +305,6 @@ class RetrievalAugmentedGenerator(TacticGenerator, pl.LightningModule):
                 state,
                 file_path,
                 theorem_full_name,
-                theorem_pos,
                 self.eval_num_retrieved,
             )
             state = [

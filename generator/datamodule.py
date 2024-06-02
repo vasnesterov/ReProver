@@ -20,6 +20,7 @@ from common import (
     format_tactic,
     _format_augmented_state,
     format_augmented_state,
+    path_to_module,
 )
 
 
@@ -87,7 +88,7 @@ class GeneratorDataset(Dataset):
 
         if self.preds is not None:
             file_path = ex["file_path"]
-            pred = self.preds[(file_path, ex["full_name"], ex["state"])]
+            pred = self.preds[(path_to_module(file_path), ex["full_name"], ex["state"])]
             ex["state"] = format_augmented_state(
                 ex["state"],
                 pred["retrieved_premises"],
@@ -156,7 +157,11 @@ class GeneratorDataModule(pl.LightningDataModule):
         super().__init__()
         self.data_path = data_path
         if corpus_path is not None:
-            self.corpus = Corpus(corpus_path)
+            self.corpus = Corpus(
+                jsonl_path=os.path.join(corpus_path, "corpus.jsonl"),
+                dot_imports_path=os.path.join(corpus_path, "import_graph.dot"),
+                json_in_file_premises_path=os.path.join(corpus_path, "available_premises.json") ## FIXME
+            )
         else:
             self.corpus = None
         self.keep_marks = keep_marks
@@ -177,7 +182,7 @@ class GeneratorDataModule(pl.LightningDataModule):
             self.preds = {}
             for pred in pickle.load(open(preds_path, "rb")):
                 ctx = pred["context"]
-                self.preds[ctx.path, ctx.theorem_full_name, ctx.state] = pred
+                self.preds[ctx.module, ctx.theorem_full_name, ctx.state] = pred
         
         self.use_raw_data = use_raw_data
 
@@ -354,7 +359,11 @@ class MultipleSegmentGeneratorDataModule(pl.LightningDataModule):
         super().__init__()
         self.data_path = data_path
         if corpus_path is not None:
-            self.corpus = Corpus(corpus_path)
+            self.corpus = Corpus(
+                jsonl_path=os.path.join(corpus_path, "corpus.jsonl"),
+                dot_imports_path=os.path.join(corpus_path, "import_graph.dot"),
+                json_in_file_premises_path=os.path.join(corpus_path, "available_premises.json") ## FIXME
+            )
         else:
             self.corpus = None
         self.keep_marks = keep_marks

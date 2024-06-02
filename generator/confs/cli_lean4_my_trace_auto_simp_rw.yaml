@@ -32,18 +32,17 @@ model:
   eval_num_retrieved: 100
   eval_num_cpus: 12
   eval_num_theorems: 0
-  ret_ckpt_path: ./lightning_logs/version_39/checkpoints/epoch=29-step=800000.ckpt
 
 data:
-  data_path: data/my_trace/canonical
+  data_path: data/my_trace/auto_merged_simp_rw
   corpus_path: data/my_trace/corpus
   keep_marks: true
-  preds_path: ./lightning_logs/version_42/predictions.pickle
+  preds_path: ./lightning_logs/version_50/predictions.pickle
   batch_size: 8  # effective_batch_size == batch_size * accumulate_grad_batches * devices
   eval_batch_size: 64
   max_inp_seq_len: 2300
   max_oup_seq_len: 512
   p_drop: 0.5
   normalize_tactics: true
-  num_workers: 16
+  num_workers: 8
   use_raw_data: true

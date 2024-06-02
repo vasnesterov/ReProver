@@ -14,7 +14,7 @@ def check_process_by_substring(substring):
             return True
     return False
 
-file = 'nohup.out'
+file = 'auto_simp_rw.log'
 
 cmd = f'grep "proof!" {file} | wc -l && grep "Proving Theorem" {file} | wc -l'
 

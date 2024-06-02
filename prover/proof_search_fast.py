@@ -29,6 +29,7 @@ from ray.util.actor_pool import ActorPool
 from common import zip_strict
 from prover.search_tree import *
 from generator.model import RetrievalAugmentedGenerator, FixedTacticGenerator, RMTRetrievalAugmentedGenerator
+from retrieval.model import PremiseRetriever
 
 
 @dataclass(frozen=True)
@@ -391,6 +392,16 @@ class AsyncGpuProxy:
         self.model = model_class.load(
             ckpt_path, device=torch.device("cuda"), freeze=True
         )
+        if ckpt_path == './to_valid/canonical_ret.ckpt': ## DELETE ME; FIXME; ужасающий костыль
+            self.model.retriever = PremiseRetriever.load(
+                './lightning_logs/version_39/checkpoints/epoch=29-step=800000.ckpt', torch.device("cuda"), freeze=True
+            )
+        if ckpt_path == './to_valid/simp_rw_ret.ckpt': ## DELETE ME; FIXME; ужасающий костыль
+            self.model.retriever = PremiseRetriever.load(
+                './lightning_logs/version_40/checkpoints/epoch=18-step=800000.ckpt', torch.device("cuda"), freeze=True
+            )
+        if indexed_corpus_path is not None:
+            assert self.model.retriever is not None
         if self.model.retriever is not None:
             if indexed_corpus_path is not None:
                 self.model.retriever.load_corpus(indexed_corpus_path)

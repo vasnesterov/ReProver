@@ -29,6 +29,12 @@ def remove_marks(s: str) -> str:
     """Remove all :code:`<a>` and :code:`</a>` from ``s``."""
     return s.replace(MARK_START_SYMBOL, "").replace(MARK_END_SYMBOL, "")
 
+_SPACES_REGEX = re.compile(r"\s+", re.DOTALL)
+
+
+def normalize_spaces(s: str) -> str:
+    """Repalce any consecutive block of whitespace characters in ``s`` with a single whitespace."""
+    return _SPACES_REGEX.sub(" ", s).strip()
 
 @dataclass(unsafe_hash=True)
 class Context:
@@ -90,6 +96,7 @@ class Premise:
         """Serialize the premise into a string for Transformers."""
         annot_full_name = f"{MARK_START_SYMBOL}{self.full_name}{MARK_END_SYMBOL}"
         code = self.code.replace(f"_root_.{self.full_name}", annot_full_name)
+        code = normalize_spaces(code)
         # fields = self.full_name.split(".")
 
         # for i in range(len(fields)):
@@ -99,7 +106,7 @@ class Premise:
         #         code = new_code
         #         break
 
-        return code
+        return f"{self.kind} {annot_full_name} : {code}"
 
 def load_available_premises(json_path):
     data = json.load(open(json_path))
@@ -325,20 +332,25 @@ class Corpus:
         scores = [[] for _ in batch_context]
 
         for j, (ctx, idxs) in enumerate(zip(batch_context, idxs_batch)):
-            accessible_premises = set(self.get_imported_premises(ctx.module) + self.in_file_premises[ctx.theorem_full_name]["inFilePremises"])
+            accessible_premises = None
+            try:
+                accessible_premises = set(self.get_imported_premises(ctx.module) + self.in_file_premises[ctx.theorem_full_name]["inFilePremises"])
+            except KeyError:
+                pass
+            except nx.exception.NetworkXError:
+                pass
             for i in idxs:
                 p = self.all_premises[i]
-                if p in accessible_premises:
+                if accessible_premises is None or p in accessible_premises:
                     results[j].append(p)
                     scores[j].append(similarities[j, i].item())
                     if len(results[j]) >= k:
-                        
                         break
-            else:
-                print(ctx.module, ctx.theorem_full_name)
-                print(len(accessible_premises))
-                print(len(self.get_imported_premises(ctx.module)))
-                raise ValueError
+            #else:
+            #    print(ctx.module, ctx.theorem_full_name)
+            #    print(len(accessible_premises))
+            #    print(len(self.get_imported_premises(ctx.module)))
+            #    raise ValueError
 
         return results, scores
 
@@ -381,14 +393,6 @@ def get_all_pos_premises(annot_tac, corpus: Corpus) -> List[Premise]:
             logger.warning(f"Cannot locate premise: {prov}")
 
     return list(all_pos_premises)
-
-
-_SPACES_REGEX = re.compile(r"\s+", re.DOTALL)
-
-
-def normalize_spaces(s: str) -> str:
-    """Repalce any consecutive block of whitespace characters in ``s`` with a single whitespace."""
-    return _SPACES_REGEX.sub(" ", s).strip()
 
 
 def format_tactic(annot_tac: str, provenances, normalize: bool) -> str:

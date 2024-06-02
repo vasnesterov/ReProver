@@ -34,10 +34,10 @@ model:
   eval_num_theorems: 0
 
 data:
-  data_path: data/my_trace/auto
-  corpus_path: null
+  data_path: data/my_trace/auto_merged
+  corpus_path: data/my_trace/corpus
   keep_marks: true
-  preds_path: null
+  preds_path: ./lightning_logs/version_51/predictions.pickle
   batch_size: 8  # effective_batch_size == batch_size * accumulate_grad_batches * devices
   eval_batch_size: 64
   max_inp_seq_len: 2300
